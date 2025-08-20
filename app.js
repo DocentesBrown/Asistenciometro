@@ -6,6 +6,12 @@ const LS_KEY = 'agenda_estudiantes_v1';
 function uid(prefix) { prefix = prefix || 'id'; return prefix + '_' + Math.random().toString(36).slice(2,9); }
 function safeStats(stats) { return stats && typeof stats === 'object' ? stats : { present:0, absent:0, later:0 }; }
 function pct(stats) { const s = safeStats(stats); const d = (s.present||0) + (s.absent||0); return d ? Math.round((s.present/d)*100) : 0; }
+function todayStr(d=new Date()){
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const day = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
 function loadState() {
   try {
     const raw = localStorage.getItem(LS_KEY);
@@ -19,32 +25,15 @@ function loadState() {
   } catch { return { courses:{}, selectedCourseId:null, selectedDate: todayStr() }; }
 }
 function saveState(state){ localStorage.setItem(LS_KEY, JSON.stringify(state)); }
-function todayStr(d=new Date()){
-  // yyyy-mm-dd en hora local del navegador
-  const y = d.getFullYear();
-  const m = String(d.getMonth()+1).padStart(2,'0');
-  const day = String(d.getDate()).padStart(2,'0');
-  return `${y}-${m}-${day}`;
-}
 
 // ===== UI Components =====
 
-function Header({ selectedDate, onChangeDate, onExport, onImport }) {
-  const fileRef = React.useRef(null);
-  function triggerImport(){ if(fileRef.current) fileRef.current.click(); }
-  function handleFile(ev){
-    const file = ev.target.files && ev.target.files[0];
-    if(!file) return;
-    const reader = new FileReader();
-    reader.onload = () => { try { onImport(reader.result); } finally { ev.target.value=''; } };
-    reader.readAsText(file);
-  }
-
+function Header({ selectedDate, onChangeDate }) {
   return e('header',
     { className: 'w-full p-4 md:p-6 bg-slate-900 text-white flex items-center justify-between sticky top-0 z-10 shadow' },
     e('div', { className:'flex flex-col gap-1' },
       e('div', { className:'flex items-center gap-3' },
-        e('span', { className:'text-2xl md:text-3xl font-bold tracking-tight' }, 'Agenda de Estudiantes')
+        e('span', { className:'text-2xl md:text-3xl font-bold tracking-tight' }, 'Asistencia de Estudiantes')
       ),
       e('a', {
           href:'https://www.instagram.com/docentesbrown',
@@ -60,14 +49,10 @@ function Header({ selectedDate, onChangeDate, onExport, onImport }) {
         value:selectedDate,
         onChange:(ev)=>onChangeDate(ev.target.value),
         className:'text-slate-900 rounded-md px-2 py-1 text-sm'
-      }),
-      e('button', { onClick:onExport, className:'ml-2 px-3 py-1.5 rounded-lg bg-sky-500 hover:bg-sky-600 text-white text-sm' }, 'Exportar'),
-      e('button', { onClick:triggerImport, className:'px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-900 text-sm' }, 'Importar'),
-      e('input', { ref:fileRef, type:'file', accept:'.json,application/json', className:'hidden', onChange:handleFile })
+      })
     )
   );
 }
-
 
 function EmptyState({ onCreateCourse }) {
   return e('div', { className:'p-6 md:p-10 text-center' },
@@ -111,7 +96,7 @@ function CoursesBar({ courses, selectedCourseId, onSelect, onCreate, onRename, o
   );
 }
 
-function StudentsTable({ students, onAdd, onEdit, onDelete }) {
+function StudentsTable({ students, onAdd, onEdit, onDelete, onShowAbsences }) {
   const [name, setName] = useState('');
   const sorted = useMemo(() => Object.values(students).sort((a,b)=>a.name.localeCompare(b.name)), [students]);
 
@@ -137,7 +122,7 @@ function StudentsTable({ students, onAdd, onEdit, onDelete }) {
             e('th', { className:'p-3 text-sm' }, '% Asistencia'),
             e('th', { className:'p-3 text-sm' }, 'Presente'),
             e('th', { className:'p-3 text-sm' }, 'Ausente'),
-            e('th', { className:'p-3 text-sm' }, 'Revisar'),
+            // REMOVIDO: columna "Revisar"
             e('th', { className:'p-3 text-sm' })
           )
         ),
@@ -157,15 +142,22 @@ function StudentsTable({ students, onAdd, onEdit, onDelete }) {
                   ),
                   e('td', { className:'p-3 font-semibold' }, pct(st) + '%'),
                   e('td', { className:'p-3' }, st.present || 0),
-                  e('td', { className:'p-3' }, st.absent || 0),
-                  e('td', { className:'p-3' }, st.later  || 0),
+                  e('td', { className:'p-3' },
+                    e('div', { className:'flex items-center gap-2' },
+                      e('span', null, st.absent || 0),
+                      e('button', {
+                        onClick:()=>onShowAbsences(s),
+                        className:'text-xs px-2 py-1 rounded bg-slate-100 hover:bg-slate-200'
+                      }, 'Fechas')
+                    )
+                  ),
                   e('td', { className:'p-3 text-right' },
                     e('button', { onClick:()=>onDelete(s.id), className:'text-xs px-3 py-1 rounded bg-rose-100 hover:bg-rose-200 text-rose-700' }, 'Eliminar')
                   )
                 );
               })
             : [e('tr', { key:'empty' },
-                e('td', { colSpan:6, className:'p-4 text-center text-slate-500' }, 'Sin estudiantes. Agregue usando el campo superior.')
+                e('td', { colSpan:5, className:'p-4 text-center text-slate-500' }, 'Sin estudiantes. Agregue usando el campo superior.')
               )]
           )
         )
@@ -175,13 +167,10 @@ function StudentsTable({ students, onAdd, onEdit, onDelete }) {
 }
 
 function RollCallCard({ students, onMark, onUndo, selectedDate }) {
-  // Orden de pasada (para mover "Revisar más tarde" al final)
   const [order, setOrder] = useState(students.map(s => s.id));
   const [index, setIndex] = useState(0);
-  // Pila de operaciones para deshacer: {id, action, type:'mark', fromIndex, toIndex}
   const [ops, setOps] = useState([]);
 
-  // Si cambia el listado, reinicializamos orden e índice
   useEffect(() => {
     setOrder(students.map(s => s.id));
     setIndex(0);
@@ -193,50 +182,36 @@ function RollCallCard({ students, onMark, onUndo, selectedDate }) {
 
   function handleAction(action){
     if(!current) return;
-
-    // Registrar marca en el estado global (con fecha)
     onMark(current.id, action, selectedDate);
 
     if (action === 'later') {
-      // mover al final y NO adelantar el índice (así ves al que sigue)
       const from = index;
-      const to = order.length - 1; // quedará al final
       const newOrder = order.slice();
       const [m] = newOrder.splice(from, 1);
       newOrder.push(m);
       setOrder(newOrder);
       setOps(ops => ops.concat([{ id: current.id, action, type:'mark', fromIndex: from, toIndex: newOrder.length - 1 }]));
-      // index queda igual para mostrar el siguiente de la lista
       return;
     }
-
-    // present/absent: avanzar al siguiente
     const from = index;
     setOps(ops => ops.concat([{ id: current.id, action, type:'mark', fromIndex: from, toIndex: from }]));
-    setIndex(i => Math.min(i + 1, order.length)); // puede llegar a length => lista completada
+    setIndex(i => Math.min(i + 1, order.length));
   }
 
   function goBack(){
     if (ops.length === 0) return;
     const last = ops[ops.length - 1];
-
-    // 1) Deshacer en estado global (restar conteo y quitar historial)
     onUndo(last.id, last.action, selectedDate);
 
-    // 2) Restaurar orden si fue 'later'
     if (last.action === 'later' && typeof last.fromIndex === 'number' && typeof last.toIndex === 'number') {
       const newOrder = order.slice();
-      // mover desde toIndex hacia fromIndex
       const [m] = newOrder.splice(last.toIndex, 1);
       newOrder.splice(last.fromIndex, 0, m);
       setOrder(newOrder);
       setIndex(last.fromIndex);
     } else {
-      // present/absent: solo retroceder índice
       setIndex(i => Math.max(0, i - 1));
     }
-
-    // 3) sacar la última operación de la pila
     setOps(arr => arr.slice(0, -1));
   }
 
@@ -270,11 +245,52 @@ function RollCallCard({ students, onMark, onUndo, selectedDate }) {
   );
 }
 
+// Barra inferior con Importar/Exportar (JSON y XLSX)
+function BottomActions({ onExportJSON, onImportJSON, onExportXLSX }) {
+  const fileRef = useRef(null);
+  function triggerImport(){ if(fileRef.current) fileRef.current.click(); }
+  function handleFile(ev){
+    const file = ev.target.files && ev.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = () => { try { onImportJSON(reader.result); } finally { ev.target.value=''; } };
+    reader.readAsText(file);
+  }
+
+  return e('div', { className:'p-4 md:p-6 sticky bottom-0 bg-white border-t border-slate-200 shadow-sm' },
+    e('div', { className:'max-w-3xl mx-auto grid grid-cols-1 sm:grid-cols-3 gap-3' },
+      e('button', { onClick:onExportJSON, className:'px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-semibold' }, 'Exportar JSON'),
+      e('button', { onClick:triggerImport, className:'px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-900 font-semibold' }, 'Importar JSON'),
+      e('button', { onClick:onExportXLSX, className:'px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold' }, 'Exportar .xlsx'),
+      e('input', { ref:fileRef, type:'file', accept:'.json,application/json', className:'hidden', onChange:handleFile })
+    )
+  );
+}
+
+// Modal simple
+function Modal({ open, title, onClose, children }) {
+  if (!open) return null;
+  return e('div', { className:'fixed inset-0 z-50 flex items-end sm:items-center justify-center' },
+    e('div', { className:'absolute inset-0 bg-black/40', onClick:onClose }),
+    e('div', { className:'relative w-full sm:max-w-md bg-white rounded-t-2xl sm:rounded-2xl shadow-lg p-4 sm:p-6 m-0 sm:m-4' },
+      e('div', { className:'flex items-center justify-between mb-3' },
+        e('h3', { className:'text-lg font-semibold' }, title),
+        e('button', { onClick:onClose, className:'px-2 py-1 rounded bg-slate-100 hover:bg-slate-200' }, '✕')
+      ),
+      e('div', null, children)
+    )
+  );
+}
+
 function App() {
   const [state, setState] = useState(loadState());
   const courses = state.courses;
   const selectedCourseId = state.selectedCourseId;
   const selectedDate = state.selectedDate || todayStr();
+
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalStudent, setModalStudent] = useState(null);
+  const [modalDates, setModalDates] = useState([]);
 
   useEffect(() => { saveState(state); }, [state]);
 
@@ -352,7 +368,7 @@ function App() {
     });
   }
 
-  // Registra marca con fecha; acumula stats totales y apendea historial [{date,status}]
+  // Registra marca con fecha; acumula stats y apendea historial [{date,status}]
   function markAttendance(studentId, action, dateStr){
     setState(s=>{
       const next = Object.assign({}, s);
@@ -372,7 +388,7 @@ function App() {
     });
   }
 
-  // Deshace última marca (resta contadores y quita la última entrada de historial que coincida)
+  // Deshacer última marca
   function undoAttendance(studentId, action, dateStr){
     setState(s=>{
       const next = Object.assign({}, s);
@@ -382,7 +398,6 @@ function App() {
       let stats = safeStats(st.stats);
       stats = { present:stats.present||0, absent:stats.absent||0, later:stats.later||0 };
 
-      // Buscar desde el final la última coincidencia (status + fecha)
       const hist = (st.history || []).slice();
       for (let i = hist.length - 1; i >= 0; i--) {
         const h = hist[i];
@@ -394,7 +409,6 @@ function App() {
           break;
         }
       }
-
       st.stats = stats; st.history = hist; students[studentId] = st; course.students = students;
       next.courses = Object.assign({}, next.courses); next.courses[selectedCourseId] = course;
       return next;
@@ -406,8 +420,8 @@ function App() {
     return Object.values(selectedCourse.students).sort((a,b)=>a.name.localeCompare(b.name));
   }, [selectedCourse]);
 
-
-  function exportState(){
+  // Export / Import JSON
+  function exportStateJSON(){
     try{
       const data = JSON.stringify(state, null, 2);
       const blob = new Blob([data], {type:'application/json'});
@@ -438,8 +452,46 @@ function App() {
       alert('Archivo inválido. Debe ser un JSON exportado por esta app.');
     }
   }
+
+  // Exportar a XLSX (historial por estudiante con fechas y estado)
+  function exportXLSX(){
+    if (!selectedCourse) { alert('Primero seleccioná un curso.'); return; }
+    const course = selectedCourse;
+    // Hoja "Historial": Estudiante | Fecha | Estado
+    const rows = [['Estudiante','Fecha','Estado']];
+    Object.values(course.students).forEach(st => {
+      (st.history || []).forEach(h => {
+        rows.push([st.name, h.date, h.status]);
+      });
+    });
+    // Hoja "Resumen": Estudiante | Presente | Ausente | % Asistencia
+    const resumen = [['Estudiante','Presente','Ausente','% Asistencia']];
+    Object.values(course.students).forEach(st => {
+      const stats = safeStats(st.stats);
+      resumen.push([st.name, stats.present||0, stats.absent||0, pct(stats)]);
+    });
+
+    // Crear libro
+    const wb = XLSX.utils.book_new();
+    const wsHist = XLSX.utils.aoa_to_sheet(rows);
+    const wsRes = XLSX.utils.aoa_to_sheet(resumen);
+    XLSX.utils.book_append_sheet(wb, wsHist, 'Historial');
+    XLSX.utils.book_append_sheet(wb, wsRes, 'Resumen');
+
+    const fileName = `asistencia_${course.name.replace(/[^\w\-]+/g,'_')}.xlsx`;
+    XLSX.writeFile(wb, fileName);
+  }
+
+  // Modal: mostrar fechas de ausencias de un estudiante
+  function showAbsences(student){
+    const dates = (student.history || []).filter(h => h.status === 'absent').map(h => h.date).sort();
+    setModalStudent(student);
+    setModalDates(dates);
+    setModalOpen(true);
+  }
+
   return e('div', null,
-    e(Header, { selectedDate, onChangeDate:setSelectedDate, onExport:exportState, onImport:importStateFromText }),
+    e(Header, { selectedDate, onChangeDate:setSelectedDate }),
     Object.keys(courses).length === 0
       ? e(EmptyState, { onCreateCourse:createCourse })
       : e(React.Fragment, null,
@@ -460,9 +512,30 @@ function App() {
                   onMark:markAttendance,
                   onUndo:undoAttendance
                 }),
-                e(StudentsTable, { students:selectedCourse.students, onAdd:addStudent, onEdit:editStudent, onDelete:deleteStudent })
+                e(StudentsTable, {
+                  students:selectedCourse.students,
+                  onAdd:addStudent,
+                  onEdit:editStudent,
+                  onDelete:deleteStudent,
+                  onShowAbsences:showAbsences
+                }),
+                e(BottomActions, {
+                  onExportJSON:exportStateJSON,
+                  onImportJSON:importStateFromText,
+                  onExportXLSX:exportXLSX
+                })
               )
-        )
+        ),
+
+    e(Modal, {
+      open:modalOpen,
+      title: modalStudent ? `Fechas de ausencia – ${modalStudent.name}` : 'Fechas de ausencia',
+      onClose:()=>setModalOpen(false)
+    },
+      modalDates.length
+        ? e('ul', { className:'list-disc ml-5 space-y-1' }, ...modalDates.map((d,i)=>e('li',{key:i},d)))
+        : e('div', { className:'text-slate-600' }, 'No hay inasistencias registradas.')
+    )
   );
 }
 
@@ -490,7 +563,6 @@ root.render(e(App));
     const newOrder = order.slice();
     const [m] = newOrder.splice(from, 1);
     newOrder.push(m);
-    // esperado: ['b','c','a']
     window.__TEST_LATER_OK__ = (newOrder.join(',') === 'b,c,a');
   })();
   const t6 = assert('later mueve al final', window.__TEST_LATER_OK__ === true);
@@ -502,7 +574,6 @@ root.render(e(App));
       {date:'2025-08-02', status:'later'},
       {date:'2025-08-02', status:'absent'}
     ]};
-    // simulamos undo 'absent' en 2025-08-02
     const stats = Object.assign({present:0,absent:0,later:0}, s.stats);
     const hist = s.history.slice();
     for (let i=hist.length-1;i>=0;i--){
