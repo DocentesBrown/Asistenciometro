@@ -13,16 +13,21 @@ function todayStr(d=new Date()){
   return `${y}-${m}-${day}`;
 }
 function loadState() {
+  // Por defecto SIEMPRE mostrar la fecha de HOY (se puede modificar luego)
   try {
     const raw = localStorage.getItem(LS_KEY);
-    if (!raw) return { courses:{}, selectedCourseId:null, selectedDate: todayStr() };
+    const base = { courses:{}, selectedCourseId:null, selectedDate: todayStr() };
+    if (!raw) return base;
     const parsed = JSON.parse(raw);
     return {
       courses: parsed.courses || {},
       selectedCourseId: parsed.selectedCourseId || null,
-      selectedDate: parsed.selectedDate || todayStr()
+      // ignoramos la fecha guardada y arrancamos siempre en "hoy"
+      selectedDate: todayStr()
     };
-  } catch { return { courses:{}, selectedCourseId:null, selectedDate: todayStr() }; }
+  } catch {
+    return { courses:{}, selectedCourseId:null, selectedDate: todayStr() };
+  }
 }
 function saveState(state){ localStorage.setItem(LS_KEY, JSON.stringify(state)); }
 
@@ -30,7 +35,8 @@ function saveState(state){ localStorage.setItem(LS_KEY, JSON.stringify(state)); 
 
 function Header({ selectedDate, onChangeDate }) {
   return e('header',
-    { className: 'w-full p-4 md:p-6 bg-slate-900 text-white flex items-center justify-between sticky top-0 z-10 shadow' },
+    { className: 'w-full p-4 md:p-6 text-white flex items-center justify-between sticky top-0 z-10 shadow',
+      style:{ background:'#24496e' } },
     e('div', { className:'flex flex-col gap-1' },
       e('div', { className:'flex items-center gap-3' },
         e('span', { className:'text-2xl md:text-3xl font-bold tracking-tight' }, 'Asistencia de Estudiantes')
@@ -39,16 +45,18 @@ function Header({ selectedDate, onChangeDate }) {
           href:'https://www.instagram.com/docentesbrown',
           target:'_blank',
           rel:'noopener',
-          className:'text-xs md:text-sm opacity-80 underline'
+          className:'text-xs md:text-sm underline',
+          style:{ opacity:.9 }
         }, 'creado por @docentesbrown')
     ),
     e('div', { className:'flex items-center gap-2' },
-      e('label', { className:'text-sm opacity-80 hidden md:block' }, 'Fecha:'),
+      e('label', { className:'text-sm opacity-90 hidden md:block' }, 'Fecha:'),
       e('input', {
         type:'date',
         value:selectedDate,
         onChange:(ev)=>onChangeDate(ev.target.value),
-        className:'text-slate-900 rounded-md px-2 py-1 text-sm'
+        className:'rounded-md px-2 py-1 text-sm',
+        style:{ color:'#24496e' }
       })
     )
   );
@@ -56,9 +64,11 @@ function Header({ selectedDate, onChangeDate }) {
 
 function EmptyState({ onCreateCourse }) {
   return e('div', { className:'p-6 md:p-10 text-center' },
-    e('h2', { className:'text-xl md:text-2xl font-semibold mb-2' }, 'No hay cursos aún'),
-    e('p', { className:'text-slate-600 mb-4' }, 'Creá tu primer curso para comenzar a tomar asistencia.'),
-    e('button', { onClick:onCreateCourse, className:'px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white shadow' }, '+ Nuevo curso')
+    e('h2', { className:'text-xl md:text-2xl font-semibold mb-2', style:{ color:'#24496e' } }, 'No hay cursos aún'),
+    e('p', { className:'text-slate-700 mb-4' }, 'Creá tu primer curso para comenzar a tomar asistencia.'),
+    e('button', { onClick:onCreateCourse,
+      className:'px-4 py-2 rounded-xl text-white shadow',
+      style:{ background:'#6c467e' } }, '+ Nuevo curso')
   );
 }
 
@@ -66,12 +76,15 @@ function CoursesBar({ courses, selectedCourseId, onSelect, onCreate, onRename, o
   const [renamingId, setRenamingId] = useState(null);
   const [newName, setNewName]   = useState('');
 
-  return e('div', { className:'w-full overflow-x-auto border-b border-slate-200 bg-white' },
+  return e('div', { className:'w-full overflow-x-auto border-b border-slate-300 bg-white' },
     e('div', { className:'flex items-center gap-2 p-3 min-w-max' },
       ...Object.values(courses).map((c) =>
         e('div', {
           key:c.id,
-          className:'flex items-center gap-2 px-3 py-2 rounded-2xl border ' + (selectedCourseId===c.id?'border-sky-500 bg-sky-50':'border-slate-200')
+          className:'flex items-center gap-2 px-3 py-2 rounded-2xl border',
+          style: selectedCourseId===c.id
+            ? { borderColor:'#24496e', background:'#f0f4f8' }
+            : { borderColor:'#d7dbe0' }
         },
           renamingId===c.id
             ? e('input', {
@@ -79,19 +92,28 @@ function CoursesBar({ courses, selectedCourseId, onSelect, onCreate, onRename, o
                 onChange:(ev)=>setNewName(ev.target.value),
                 onBlur:()=>{ onRename(c.id, newName || c.name); setRenamingId(null); },
                 onKeyDown:(ev)=>{ if(ev.key==='Enter'){ onRename(c.id, newName||c.name); setRenamingId(null); } if(ev.key==='Escape'){ setRenamingId(null); } },
-                className:'px-2 py-1 text-sm border rounded'
+                className:'px-2 py-1 text-sm border rounded',
+                style:{ borderColor:'#d7dbe0' }
               })
             : e('button', {
-                className:'text-sm font-medium ' + (selectedCourseId===c.id?'text-sky-800':'text-slate-700'),
+                className:'text-sm font-medium',
+                style:{ color: selectedCourseId===c.id ? '#24496e' : '#334155' },
                 onClick:()=>onSelect(c.id)
               }, c.name),
           e('div', { className:'flex items-center gap-1' },
-            e('button', { title:'Renombrar', onClick:()=>{ setRenamingId(c.id); setNewName(c.name); }, className:'text-xs px-2 py-1 rounded bg-slate-100 hover:bg-slate-200' }, '✎'),
-            e('button', { title:'Eliminar curso', onClick:()=>onDelete(c.id), className:'text-xs px-2 py-1 rounded bg-rose-100 hover:bg-rose-200 text-rose-700' }, '🗑')
+            e('button', { title:'Renombrar',
+              onClick:()=>{ setRenamingId(c.id); setNewName(c.name); },
+              className:'text-xs px-2 py-1 rounded',
+              style:{ background:'#f3efdc', color:'#24496e' } }, '✎'),
+            e('button', { title:'Eliminar curso', onClick:()=>onDelete(c.id),
+              className:'text-xs px-2 py-1 rounded',
+              style:{ background:'#fde2e0', color:'#da6863' } }, '🗑')
           )
         )
       ),
-      e('button', { onClick:onCreate, className:'px-3 py-2 rounded-2xl bg-slate-100 hover:bg-slate-200 text-sm' }, '+ Nuevo curso')
+      e('button', { onClick:onCreate,
+        className:'px-3 py-2 rounded-2xl text-sm',
+        style:{ background:'#f3efdc', color:'#24496e' } }, '+ Nuevo curso')
     )
   );
 }
@@ -103,26 +125,27 @@ function StudentsTable({ students, onAdd, onEdit, onDelete, onShowAbsences }) {
   return e('div', { className:'p-4 md:p-6' },
     e('div', { className:'flex flex-col md:flex-row gap-2 md:items-end mb-4' },
       e('div', { className:'flex-1' },
-        e('label', { className:'block text-sm font-medium mb-1' }, 'Agregar estudiante'),
+        e('label', { className:'block text-sm font-medium mb-1', style:{ color:'#24496e' } }, 'Agregar estudiante'),
         e('input', {
           placeholder:'Nombre y apellido', value:name, onChange:(ev)=>setName(ev.target.value),
-          className:'w-full max-w-md px-3 py-2 border rounded-xl'
+          className:'w-full max-w-md px-3 py-2 border rounded-xl',
+          style:{ borderColor:'#d7dbe0' }
         })
       ),
       e('button', {
         onClick:()=>{ if(!name.trim()) return; onAdd(name.trim()); setName(''); },
-        className:'px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white'
+        className:'px-4 py-2 rounded-xl text-white',
+        style:{ background:'#6c467e' }
       }, '+ Agregar')
     ),
     e('div', { className:'overflow-x-auto' },
-      e('table', { className:'w-full text-left border border-slate-200 rounded-xl overflow-hidden' },
-        e('thead', { className:'bg-slate-50' },
+      e('table', { className:'w-full text-left border rounded-xl overflow-hidden', style:{ borderColor:'#d7dbe0' } },
+        e('thead', { style:{ background:'#f7f8fa' } },
           e('tr', null,
-            e('th', { className:'p-3 text-sm' }, 'Estudiante'),
-            e('th', { className:'p-3 text-sm' }, '% Asistencia'),
-            e('th', { className:'p-3 text-sm' }, 'Presente'),
-            e('th', { className:'p-3 text-sm' }, 'Ausente'),
-            // REMOVIDO: columna "Revisar"
+            e('th', { className:'p-3 text-sm', style:{ color:'#24496e' } }, 'Estudiante'),
+            e('th', { className:'p-3 text-sm', style:{ color:'#24496e' } }, '% Asistencia'),
+            e('th', { className:'p-3 text-sm', style:{ color:'#24496e' } }, 'Presente'),
+            e('th', { className:'p-3 text-sm', style:{ color:'#24496e' } }, 'Ausente'),
             e('th', { className:'p-3 text-sm' })
           )
         ),
@@ -130,29 +153,33 @@ function StudentsTable({ students, onAdd, onEdit, onDelete, onShowAbsences }) {
           ...(sorted.length
             ? sorted.map((s) => {
                 const st = safeStats(s.stats);
-                return e('tr', { key:s.id, className:'border-t' },
+                return e('tr', { key:s.id, className:'border-t', style:{ borderColor:'#e5e7eb' } },
                   e('td', { className:'p-3' },
                     e('div', { className:'flex items-center gap-2' },
                       e('span', { className:'font-medium' }, s.name),
                       e('button', {
                         onClick:()=>{ const nuevo = prompt('Editar nombre', s.name); if(nuevo && nuevo.trim()) onEdit(s.id, nuevo.trim()); },
-                        className:'text-xs px-2 py-1 rounded bg-slate-100 hover:bg-slate-200'
+                        className:'text-xs px-2 py-1 rounded',
+                        style:{ background:'#f3efdc', color:'#24496e' }
                       }, 'Editar')
                     )
                   ),
-                  e('td', { className:'p-3 font-semibold' }, pct(st) + '%'),
+                  e('td', { className:'p-3 font-semibold', style:{ color:'#24496e' } }, pct(st) + '%'),
                   e('td', { className:'p-3' }, st.present || 0),
                   e('td', { className:'p-3' },
                     e('div', { className:'flex items-center gap-2' },
                       e('span', null, st.absent || 0),
                       e('button', {
                         onClick:()=>onShowAbsences(s),
-                        className:'text-xs px-2 py-1 rounded bg-slate-100 hover:bg-slate-200'
+                        className:'text-xs px-2 py-1 rounded',
+                        style:{ background:'#f3efdc', color:'#24496e' }
                       }, 'Fechas')
                     )
                   ),
                   e('td', { className:'p-3 text-right' },
-                    e('button', { onClick:()=>onDelete(s.id), className:'text-xs px-3 py-1 rounded bg-rose-100 hover:bg-rose-200 text-rose-700' }, 'Eliminar')
+                    e('button', { onClick:()=>onDelete(s.id),
+                      className:'text-xs px-3 py-1 rounded',
+                      style:{ background:'#fde2e0', color:'#da6863' } }, 'Eliminar')
                   )
                 );
               })
@@ -220,32 +247,51 @@ function RollCallCard({ students, onMark, onUndo, selectedDate }) {
   const cardPos = Math.min(index + 1, order.length);
   return e('div', { className:'p-4 md:p-6' },
     e('div', { className:'max-w-xl mx-auto' },
-      e('div', { className:'mb-3 text-sm text-slate-500 text-center' }, `Tarjeta ${cardPos} / ${order.length}`),
+      e('div', { className:'mb-3 text-sm text-slate-600 text-center' }, `Tarjeta ${cardPos} / ${order.length}`),
       current
-        ? e('div', { className:'rounded-3xl border border-slate-200 shadow p-6 md:p-8 bg-white' },
+        ? e('div', { className:'rounded-3xl border shadow p-6 md:p-8 bg-white', style:{ borderColor:'#d7dbe0' } },
             e('div', { className:'text-center mb-6' },
-              e('div', { className:'text-2xl md:text-4xl font-bold tracking-tight mb-2' }, current.name),
-              e('div', { className:'text-sm md:text-base text-slate-600' },
-                'Asistencia acumulada: ', e('span', { className:'font-semibold' }, pct(current.stats) + '%'),
-                ' · Fecha sesión: ', e('span', { className:'font-semibold' }, selectedDate)
+              e('div', { className:'text-2xl md:text-4xl font-bold tracking-tight mb-2', style:{ color:'#24496e' } }, current.name),
+              e('div', { className:'text-sm md:text-base text-slate-700' },
+                'Asistencia acumulada: ', e('span', { className:'font-semibold', style:{ color:'#24496e' } }, pct(current.stats) + '%'),
+                ' · Fecha sesión: ', e('span', { className:'font-semibold', style:{ color:'#24496e' } }, selectedDate)
               )
             ),
             e('div', { className:'grid grid-cols-2 gap-3 md:gap-4' },
-              e('button', { onClick:()=>handleAction('present'), className:'py-3 md:py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow' }, 'Presente ✅'),
-              e('button', { onClick:()=>handleAction('absent'),  className:'py-3 md:py-4 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white font-semibold shadow'   }, 'Ausente ❌'),
-              e('button', { onClick:()=>handleAction('later'),   className:'py-3 md:py-4 rounded-2xl bg-amber-500 hover:bg-amber-600 text-white font-semibold shadow col-span-2' }, 'Revisar más tarde ⏳'),
-              e('button', { onClick:goBack, className:'py-2 md:py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-medium col-span-2' }, '← Volver al anterior (deshacer)')
+              // Presente (verde suave)
+              e('button', {
+                onClick:()=>handleAction('present'),
+                className:'py-3 md:py-4 rounded-2xl font-semibold border',
+                style:{ background:'#e8f7ef', borderColor:'#cdebdc', color:'#166534' } // verde suave
+              }, 'Presente ✅'),
+              // Ausente (rojo suave)
+              e('button', {
+                onClick:()=>handleAction('absent'),
+                className:'py-3 md:py-4 rounded-2xl font-semibold border',
+                style:{ background:'#fdecea', borderColor:'#f7d7d3', color:'#991b1b' } // rojo suave
+              }, 'Ausente ❌'),
+              // Revisar más tarde (violeta suave)
+              e('button', {
+                onClick:()=>handleAction('later'),
+                className:'py-3 md:py-4 rounded-2xl font-semibold border col-span-2',
+                style:{ background:'#f0eaf5', borderColor:'#e2d7ec', color:'#6c467e' }
+              }, 'Revisar más tarde ⏳'),
+              e('button', {
+                onClick:goBack,
+                className:'py-2 md:py-2.5 rounded-xl font-medium col-span-2',
+                style:{ background:'#f3efdc', color:'#24496e' }
+              }, '← Volver al anterior (deshacer)')
             )
           )
-        : e('div', { className:'rounded-3xl border border-slate-200 shadow p-6 md:p-8 bg-white text-center' },
-            e('div', { className:'text-xl font-semibold mb-2' }, '¡Lista completada!'),
-            e('div', { className:'text-slate-600' }, 'Ya asignaste estado a todos los estudiantes. Podés volver a empezar o revisar el resumen abajo.')
+        : e('div', { className:'rounded-3xl border shadow p-6 md:p-8 bg-white text-center', style:{ borderColor:'#d7dbe0' } },
+            e('div', { className:'text-xl font-semibold mb-2', style:{ color:'#24496e' } }, '¡Lista completada!'),
+            e('div', { className:'text-slate-700' }, 'Ya asignaste estado a todos los estudiantes. Podés volver a empezar o revisar el resumen abajo.')
           )
     )
   );
 }
 
-// Barra inferior con Importar/Exportar (JSON y XLSX)
+// Barra inferior con Importar/Exportar (reordenada: XLSX → Export JSON → Import JSON)
 function BottomActions({ onExportJSON, onImportJSON, onExportXLSX }) {
   const fileRef = useRef(null);
   function triggerImport(){ if(fileRef.current) fileRef.current.click(); }
@@ -257,25 +303,36 @@ function BottomActions({ onExportJSON, onImportJSON, onExportXLSX }) {
     reader.readAsText(file);
   }
 
-  return e('div', { className:'p-4 md:p-6 sticky bottom-0 bg-white border-t border-slate-200 shadow-sm' },
+  return e('div', { className:'p-4 md:p-6 sticky bottom-0 bg-white border-t shadow-sm',
+    style:{ borderColor:'#d7dbe0' } },
     e('div', { className:'max-w-3xl mx-auto grid grid-cols-1 sm:grid-cols-3 gap-3' },
-      e('button', { onClick:onExportJSON, className:'px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-semibold' }, 'Exportar JSON'),
-      e('button', { onClick:triggerImport, className:'px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-900 font-semibold' }, 'Importar JSON'),
-      e('button', { onClick:onExportXLSX, className:'px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold' }, 'Exportar .xlsx'),
+      // 1) XLSX
+      e('button', { onClick:onExportXLSX,
+        className:'px-4 py-2 rounded-xl text-white font-semibold',
+        style:{ background:'#24496e' } }, 'Exportar .xlsx'),
+      // 2) Exportar JSON
+      e('button', { onClick:onExportJSON,
+        className:'px-4 py-2 rounded-xl font-semibold',
+        style:{ background:'#f3efdc', color:'#24496e' } }, 'Exportar JSON'),
+      // 3) Importar JSON
+      e('button', { onClick:()=> (fileRef.current && fileRef.current.click()),
+        className:'px-4 py-2 rounded-xl font-semibold',
+        style:{ background:'#f3efdc', color:'#24496e' } }, 'Importar JSON'),
       e('input', { ref:fileRef, type:'file', accept:'.json,application/json', className:'hidden', onChange:handleFile })
     )
   );
 }
 
-// Modal simple
+// Modal simple (sin cambios de lógica, con colores)
 function Modal({ open, title, onClose, children }) {
   if (!open) return null;
   return e('div', { className:'fixed inset-0 z-50 flex items-end sm:items-center justify-center' },
-    e('div', { className:'absolute inset-0 bg-black/40', onClick:onClose }),
-    e('div', { className:'relative w-full sm:max-w-md bg-white rounded-t-2xl sm:rounded-2xl shadow-lg p-4 sm:p-6 m-0 sm:m-4' },
+    e('div', { className:'absolute inset-0', onClick:onClose, style:{ background:'rgba(0,0,0,.4)' } }),
+    e('div', { className:'relative w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-lg p-4 sm:p-6 m-0 sm:m-4',
+      style:{ background:'#ffffff', border:'1px solid #d7dbe0' } },
       e('div', { className:'flex items-center justify-between mb-3' },
-        e('h3', { className:'text-lg font-semibold' }, title),
-        e('button', { onClick:onClose, className:'px-2 py-1 rounded bg-slate-100 hover:bg-slate-200' }, '✕')
+        e('h3', { className:'text-lg font-semibold', style:{ color:'#24496e' } }, title),
+        e('button', { onClick:onClose, className:'px-2 py-1 rounded', style:{ background:'#f3efdc', color:'#24496e' } }, '✕')
       ),
       e('div', null, children)
     )
@@ -368,7 +425,6 @@ function App() {
     });
   }
 
-  // Registra marca con fecha; acumula stats y apendea historial [{date,status}]
   function markAttendance(studentId, action, dateStr){
     setState(s=>{
       const next = Object.assign({}, s);
@@ -387,8 +443,6 @@ function App() {
       return next;
     });
   }
-
-  // Deshacer última marca
   function undoAttendance(studentId, action, dateStr){
     setState(s=>{
       const next = Object.assign({}, s);
@@ -420,7 +474,6 @@ function App() {
     return Object.values(selectedCourse.students).sort((a,b)=>a.name.localeCompare(b.name));
   }, [selectedCourse]);
 
-  // Export / Import JSON
   function exportStateJSON(){
     try{
       const data = JSON.stringify(state, null, 2);
@@ -444,7 +497,8 @@ function App() {
       const next = {
         courses: parsed && typeof parsed.courses==='object' ? parsed.courses : {},
         selectedCourseId: parsed && parsed.selectedCourseId ? parsed.selectedCourseId : null,
-        selectedDate: parsed && parsed.selectedDate ? parsed.selectedDate : todayStr()
+        // incluso tras importar, si querés mantener la fecha del archivo, reemplazá esta línea por: parsed.selectedDate || todayStr()
+        selectedDate: todayStr()
       };
       setState(next);
       alert('Importación exitosa. ¡Listo para usar!');
@@ -453,25 +507,21 @@ function App() {
     }
   }
 
-  // Exportar a XLSX (historial por estudiante con fechas y estado)
   function exportXLSX(){
     if (!selectedCourse) { alert('Primero seleccioná un curso.'); return; }
     const course = selectedCourse;
-    // Hoja "Historial": Estudiante | Fecha | Estado
     const rows = [['Estudiante','Fecha','Estado']];
     Object.values(course.students).forEach(st => {
       (st.history || []).forEach(h => {
         rows.push([st.name, h.date, h.status]);
       });
     });
-    // Hoja "Resumen": Estudiante | Presente | Ausente | % Asistencia
     const resumen = [['Estudiante','Presente','Ausente','% Asistencia']];
     Object.values(course.students).forEach(st => {
       const stats = safeStats(st.stats);
       resumen.push([st.name, stats.present||0, stats.absent||0, pct(stats)]);
     });
 
-    // Crear libro
     const wb = XLSX.utils.book_new();
     const wsHist = XLSX.utils.aoa_to_sheet(rows);
     const wsRes = XLSX.utils.aoa_to_sheet(resumen);
@@ -482,7 +532,6 @@ function App() {
     XLSX.writeFile(wb, fileName);
   }
 
-  // Modal: mostrar fechas de ausencias de un estudiante
   function showAbsences(student){
     const dates = (student.history || []).filter(h => h.status === 'absent').map(h => h.date).sort();
     setModalStudent(student);
@@ -500,11 +549,11 @@ function App() {
             onSelect:selectCourse, onCreate:createCourse, onRename:renameCourse, onDelete:deleteCourse
           }),
           !selectedCourse
-            ? e('div', { className:'p-6 text-slate-600' }, 'Seleccioná un curso para administrar estudiantes y tomar lista.')
+            ? e('div', { className:'p-6 text-slate-700' }, 'Seleccioná un curso para administrar estudiantes y tomar lista.')
             : e(React.Fragment, null,
                 e('div', { className:'p-4 md:p-6' },
-                  e('h2', { className:'text-xl md:text-2xl font-semibold' }, selectedCourse.name),
-                  e('p',  { className:'text-slate-600' }, 'Estudiantes: ' + studentsArr.length)
+                  e('h2', { className:'text-xl md:text-2xl font-semibold', style:{ color:'#24496e' } }, selectedCourse.name),
+                  e('p',  { className:'text-slate-700' }, 'Estudiantes: ' + studentsArr.length)
                 ),
                 e(RollCallCard, {
                   students:studentsArr,
@@ -534,7 +583,7 @@ function App() {
     },
       modalDates.length
         ? e('ul', { className:'list-disc ml-5 space-y-1' }, ...modalDates.map((d,i)=>e('li',{key:i},d)))
-        : e('div', { className:'text-slate-600' }, 'No hay inasistencias registradas.')
+        : e('div', { className:'text-slate-700' }, 'No hay inasistencias registradas.')
     )
   );
 }
