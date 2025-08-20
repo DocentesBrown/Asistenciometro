@@ -1,7 +1,7 @@
 {
-  "name": "Agenda de Estudiantes",
-  "short_name": "Agenda",
-  "description": "Tomar lista (offline): Presente/Ausente/Revisar.",
+  "name": "Asistencia de Estudiantes",
+  "short_name": "Asistencia",
+  "description": "Tomar lista: Presente/Ausente/Revisar. Optimizada para celular.",
   "start_url": ".",
   "scope": ".",
   "display": "standalone",
