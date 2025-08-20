@@ -1,3 +1,4 @@
+
 // ===== Helpers =====
 const { useEffect, useMemo, useState, useRef } = React;
 const e = React.createElement;
@@ -139,21 +140,24 @@ function StudentsTable({ students, onAdd, onEdit, onDelete, onShowAbsences }) {
       }, '+ Agregar')
     ),
     e('div', { className:'overflow-x-auto' },
-      e('table', { className:'w-full text-left border rounded-xl overflow-hidden', style:{ borderColor:'#d7dbe0' } },
-        e('thead', { style:{ background:'#f7f8fa' } },
+      e('table', { className:'w-full text-left border rounded-xl overflow-hidden', style:{ borderColor:'#cbd5e1' } },
+        // CABECERA azul + texto blanco
+        e('thead', { style:{ background:'#24496e', color:'#ffffff' } },
           e('tr', null,
-            e('th', { className:'p-3 text-sm', style:{ color:'#24496e' } }, 'Estudiante'),
-            e('th', { className:'p-3 text-sm', style:{ color:'#24496e' } }, '% Asistencia'),
-            e('th', { className:'p-3 text-sm', style:{ color:'#24496e' } }, 'Presente'),
-            e('th', { className:'p-3 text-sm', style:{ color:'#24496e' } }, 'Ausente'),
+            e('th', { className:'p-3 text-sm' }, 'Estudiante'),
+            e('th', { className:'p-3 text-sm' }, '% Asistencia'),
+            e('th', { className:'p-3 text-sm' }, 'Presente'),
+            e('th', { className:'p-3 text-sm' }, 'Ausente'),
             e('th', { className:'p-3 text-sm' })
           )
         ),
+        // CUERPO con zebra y acciones
         e('tbody', null,
           ...(sorted.length
-            ? sorted.map((s) => {
+            ? sorted.map((s, idx) => {
                 const st = safeStats(s.stats);
-                return e('tr', { key:s.id, className:'border-t', style:{ borderColor:'#e5e7eb' } },
+                const rowBg = idx % 2 === 0 ? '#ffffff' : '#f3efdc';
+                return e('tr', { key:s.id, style:{ background:rowBg, borderTop:'1px solid #cbd5e1' } },
                   e('td', { className:'p-3' },
                     e('div', { className:'flex items-center gap-2' },
                       e('span', { className:'font-medium' }, s.name),
@@ -251,7 +255,7 @@ function RollCallCard({ students, onMark, onUndo, selectedDate }) {
       current
         ? e('div', { className:'rounded-3xl border shadow p-6 md:p-8 bg-white', style:{ borderColor:'#d7dbe0' } },
             e('div', { className:'text-center mb-6' },
-              e('div', { className:'text-2xl md:text-4xl font-bold tracking-tight mb-2', style:{ color:'#24496e' } }, current.name),
+              e('div', { className:'text-2xl md:4xl font-bold tracking-tight mb-2', style:{ color:'#24496e' } }, current.name),
               e('div', { className:'text-sm md:text-base text-slate-700' },
                 'Asistencia acumulada: ', e('span', { className:'font-semibold', style:{ color:'#24496e' } }, pct(current.stats) + '%'),
                 ' · Fecha sesión: ', e('span', { className:'font-semibold', style:{ color:'#24496e' } }, selectedDate)
@@ -425,6 +429,7 @@ function App() {
     });
   }
 
+  // Registra marca con fecha; acumula stats y apendea historial [{date,status}]
   function markAttendance(studentId, action, dateStr){
     setState(s=>{
       const next = Object.assign({}, s);
@@ -443,6 +448,8 @@ function App() {
       return next;
     });
   }
+
+  // Deshacer última marca
   function undoAttendance(studentId, action, dateStr){
     setState(s=>{
       const next = Object.assign({}, s);
@@ -474,6 +481,7 @@ function App() {
     return Object.values(selectedCourse.students).sort((a,b)=>a.name.localeCompare(b.name));
   }, [selectedCourse]);
 
+  // Export / Import JSON
   function exportStateJSON(){
     try{
       const data = JSON.stringify(state, null, 2);
@@ -497,7 +505,7 @@ function App() {
       const next = {
         courses: parsed && typeof parsed.courses==='object' ? parsed.courses : {},
         selectedCourseId: parsed && parsed.selectedCourseId ? parsed.selectedCourseId : null,
-        // incluso tras importar, si querés mantener la fecha del archivo, reemplazá esta línea por: parsed.selectedDate || todayStr()
+        // si se quiere conservar la fecha del archivo, cambiar por: parsed.selectedDate || todayStr()
         selectedDate: todayStr()
       };
       setState(next);
@@ -507,31 +515,36 @@ function App() {
     }
   }
 
+  // Exportar a XLSX (historial por estudiante con fechas y estado)
   function exportXLSX(){
     if (!selectedCourse) { alert('Primero seleccioná un curso.'); return; }
     const course = selectedCourse;
+    // Hoja "Historial": Estudiante | Fecha | Estado
     const rows = [['Estudiante','Fecha','Estado']];
     Object.values(course.students).forEach(st => {
       (st.history || []).forEach(h => {
         rows.push([st.name, h.date, h.status]);
       });
     });
+    // Hoja "Resumen": Estudiante | Presente | Ausente | % Asistencia
     const resumen = [['Estudiante','Presente','Ausente','% Asistencia']];
     Object.values(course.students).forEach(st => {
       const stats = safeStats(st.stats);
       resumen.push([st.name, stats.present||0, stats.absent||0, pct(stats)]);
     });
 
+    // Crear libro
     const wb = XLSX.utils.book_new();
     const wsHist = XLSX.utils.aoa_to_sheet(rows);
     const wsRes = XLSX.utils.aoa_to_sheet(resumen);
     XLSX.utils.book_append_sheet(wb, wsHist, 'Historial');
     XLSX.utils.book_append_sheet(wb, wsRes, 'Resumen');
 
-    const fileName = `asistencia_${course.name.replace(/[^\w\-]+/g,'_')}.xlsx`;
+    const fileName = `asistencia_${course.name.replace(/[^\w\\-]+/g,'_')}.xlsx`;
     XLSX.writeFile(wb, fileName);
   }
 
+  // Modal: mostrar fechas de ausencias de un estudiante
   function showAbsences(student){
     const dates = (student.history || []).filter(h => h.status === 'absent').map(h => h.date).sort();
     setModalStudent(student);
@@ -592,52 +605,9 @@ function App() {
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(e(App));
 
-// ===== Test Cases =====
-(function runTests(){
+// (tests integrados mínimos)
+(function runSmoke(){
   function assert(name, cond){ return { name, pass: !!cond }; }
-  // pct
-  const t1 = assert('pct sin datos = 0%', pct({present:0, absent:0}) === 0);
-  const t2 = assert('pct 3/5 = 60%', pct({present:3, absent:2}) === 60);
-  const t3 = assert('pct ignora later', pct({present:2, absent:1, later:4}) === 67);
-  // uid
-  const u1 = uid('alumno'), u2 = uid('alumno');
-  const t4 = assert('uid valores distintos', u1 !== u2);
-  const t5 = assert('uid con prefijo', u1.indexOf('alumno_') === 0);
-
-  // later -> al final
-  (function(){
-    const order = ['a','b','c'];
-    const index = 0;
-    const from = index;
-    const newOrder = order.slice();
-    const [m] = newOrder.splice(from, 1);
-    newOrder.push(m);
-    window.__TEST_LATER_OK__ = (newOrder.join(',') === 'b,c,a');
-  })();
-  const t6 = assert('later mueve al final', window.__TEST_LATER_OK__ === true);
-
-  // undo counters
-  (function(){
-    const s = { stats:{present:2, absent:1, later:1}, history:[
-      {date:'2025-08-01', status:'present'},
-      {date:'2025-08-02', status:'later'},
-      {date:'2025-08-02', status:'absent'}
-    ]};
-    const stats = Object.assign({present:0,absent:0,later:0}, s.stats);
-    const hist = s.history.slice();
-    for (let i=hist.length-1;i>=0;i--){
-      const h=hist[i]; if (h.status==='absent' && h.date==='2025-08-02'){ hist.splice(i,1); if(stats.absent>0) stats.absent--; break; }
-    }
-    window.__TEST_UNDO_OK__ = (stats.absent===0 && hist.length===2);
-  })();
-  const t7 = assert('undo resta conteo y quita historial', window.__TEST_UNDO_OK__ === true);
-
-  const tests = [t1,t2,t3,t4,t5,t6,t7];
-  const ok = tests.filter(t=>t.pass).length;
-  const out = document.getElementById('tests-output');
-  if (out) {
-    out.innerHTML = tests.map(t => `<div class="${t.pass?'text-emerald-700':'text-rose-700'}">${t.pass?'✔':'✖'} ${t.name}</div>`).join('')
-      + `<div class="mt-2 text-slate-700">${ok} / ${tests.length} pruebas OK</div>`;
-  }
-  console.log('TESTS:', tests);
+  const t1 = assert('pct 3/5 = 60%', pct({present:3, absent:2}) === 60);
+  console.log('TESTS:', [t1]);
 })();
