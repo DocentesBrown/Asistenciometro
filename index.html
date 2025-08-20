@@ -5,49 +5,56 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Asistencia de Estudiantes</title>
 
-    <!-- Tailwind (estilos rápidos) -->
+    <!-- Tailwind -->
     <script src="https://cdn.tailwindcss.com"></script>
 
     <!-- Manifest -->
     <link rel="manifest" href="manifest.json" />
-    <meta name="theme-color" content="#0ea5e9" />
-
-    <!-- SheetJS para exportar a .xlsx -->
+    <meta name="theme-color" content="#24496e" />
+    <!-- SheetJS para .xlsx -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" crossorigin></script>
+
+    <style>
+      :root{
+        --azul:#24496e;   /* header / primario */
+        --crema:#f3efdc;  /* fondo */
+        --violeta:#6c467e;/* acentos */
+        --salmon:#da6863; /* CTA cafecito */
+      }
+    </style>
   </head>
-  <body class="min-h-dvh bg-slate-50 text-slate-900">
+  <body class="min-h-dvh text-slate-900" style="background:var(--crema);">
     <div id="root"></div>
 
     <!-- React 18 + ReactDOM UMD (sin JSX) -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
 
-    <!-- App (sin JSX / sin Babel) -->
     <script src="app.js"></script>
 
-    <!-- Registro del Service Worker -->
     <script>
       if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('./sw.js').catch(() => {});
+        navigator.serviceWorker.register('./sw.js').catch(()=>{});
       }
     </script>
 
-    <footer id="ayuda" class="p-6 md:p-8 text-sm text-slate-600">
+    <footer id="ayuda" class="p-6 md:p-8 text-sm text-slate-700">
       <div class="max-w-3xl mx-auto space-y-3">
-        <h3 class="text-base md:text-lg font-semibold text-slate-800">¿Cómo instalar en el celular?</h3>
+        <h3 class="text-base md:text-lg font-semibold" style="color:var(--azul)">¿Cómo instalar en el celular?</h3>
         <ol class="list-decimal ml-5 space-y-1">
           <li>En Android/Chrome: Menú ⋮ → <em>Añadir a la pantalla de inicio</em>.</li>
           <li>En iOS/Safari: Compartir → <em>Añadir a pantalla de inicio</em>.</li>
         </ol>
 
         <details class="mt-6 bg-white rounded-xl border p-4">
-          <summary class="cursor-pointer font-semibold">Pruebas integradas</summary>
+          <summary class="cursor-pointer font-semibold" style="color:var(--violeta)">Pruebas integradas</summary>
           <div id="tests-output" class="mt-3 text-sm"></div>
         </details>
 
         <div class="mt-8 text-center">
           <a href="https://cafecito.app/docentesbrown" target="_blank" rel="noopener"
-             class="inline-block px-5 py-3 rounded-2xl bg-amber-500 hover:bg-amber-600 text-white font-semibold shadow">
+             class="inline-block px-5 py-3 rounded-2xl text-white font-semibold shadow"
+             style="background:var(--salmon)">
             ☕ Bancanos con un cafecito
           </a>
         </div>
