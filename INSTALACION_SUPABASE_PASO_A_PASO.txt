@@ -1,0 +1,34 @@
+PASO A PASO (desde el paso 1 ya hecho)
+
+1. Crear usuarios en Supabase
+   - Authentication > Users > Add user
+   - Crear email + password (ese email/clave será el acceso de la app)
+
+2. Copiar credenciales públicas
+   - Project Settings > API
+   - Copiar Project URL y anon public key
+
+3. Editar index.html
+   - Reemplazar:
+     window.SUPABASE_URL = "https://TU-PROYECTO.supabase.co";
+     window.SUPABASE_ANON_KEY = "TU_ANON_KEY";
+   - Pegar tus valores reales
+
+4. Subir archivos a GitHub
+   - Reemplazar al menos: index.html y app.js
+   - (Podés subir todo este ZIP para mantener orden)
+
+5. Probar
+   - Abrí la app
+   - Si falta config, aparece aviso en pantalla
+   - Ingresá con email + contraseña de Supabase
+
+6. Migrar datos del celular viejo
+   - Si el celular ya tenía datos locales y la nube está vacía, la app te ofrece subirlos
+   - Aceptá
+   - Luego probá en otro dispositivo con el mismo usuario
+
+Notas
+- Se mantiene la estética y funciones.
+- Cambia el login (ahora email/clave de Supabase) y el guardado (nube + respaldo local).
+- “Olvidé mi contraseña” usa el mail de recuperación de Supabase.
