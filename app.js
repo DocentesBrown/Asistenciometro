@@ -68,15 +68,64 @@ function buildRiskMessage(course, student, attendancePct, promedio, teacher){
 }
 
 
+
 // ====== Supabase helpers (multi-dispositivo) ======
 function hasSupabase(){ return !!(window.sb && window.sb.auth); }
 async function sbGetUser(){ const { data, error } = await window.sb.auth.getUser(); if(error) throw error; return data.user || null; }
-async function sbSignIn(email, password){ if(!hasSupabase()) throw new Error('Falta configurar Supabase en index.html'); const { error } = await window.sb.auth.signInWithPassword({ email, password }); if(error) throw error; }
+async function sbSignIn(email, password){
+  if(!hasSupabase()) throw new Error('Falta configurar Supabase en index.html');
+  const { error } = await window.sb.auth.signInWithPassword({ email, password });
+  if(error) throw error;
+}
 async function sbSignOut(){ if(!hasSupabase()) return; const { error } = await window.sb.auth.signOut(); if(error) throw error; }
-async function sbResetPassword(email){ if(!hasSupabase()) throw new Error('Supabase no configurado.'); const { error } = await window.sb.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin + window.location.pathname }); if(error) throw error; }
-async function sbEnsureStateRow(){ const user = await sbGetUser(); if(!user) throw new Error('No hay sesión'); const { data, error } = await window.sb.from('user_app_state').select('user_id').eq('user_id', user.id).maybeSingle(); if(error) throw error; if(!data){ const { error:insErr } = await window.sb.from('user_app_state').insert({ user_id:user.id, app_state:{ courses:{}, selectedCourseId:null, selectedDate: todayStr() }, teacher_profile:{ name:'', article:'la' } }); if(insErr) throw insErr; } }
-async function sbLoadRemoteData(){ const user = await sbGetUser(); if(!user) throw new Error('No hay sesión'); const { data, error } = await window.sb.from('user_app_state').select('app_state, teacher_profile').eq('user_id', user.id).single(); if(error) throw error; return { state:{ courses:data?.app_state?.courses || {}, selectedCourseId:data?.app_state?.selectedCourseId || null, selectedDate: todayStr() }, teacher: data?.teacher_profile || { name:'', article:'la' } }; }
-async function sbSaveRemoteState(state, teacher){ const user = await sbGetUser(); if(!user) return; const { error } = await window.sb.from('user_app_state').upsert({ user_id:user.id, app_state:{ courses:state?.courses || {}, selectedCourseId:state?.selectedCourseId || null, selectedDate: state?.selectedDate || todayStr() }, teacher_profile:{ name: teacher?.name || '', article: teacher?.article || 'la' } }, { onConflict:'user_id' }); if(error) throw error; }
+async function sbResetPassword(email){
+  if(!hasSupabase()) throw new Error('Supabase no configurado.');
+  const { error } = await window.sb.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin + window.location.pathname });
+  if(error) throw error;
+}
+async function sbEnsureStateRow(){
+  const user = await sbGetUser();
+  if(!user) throw new Error('No hay sesión');
+  const { data, error } = await window.sb.from('user_app_state').select('user_id').eq('user_id', user.id).maybeSingle();
+  if(error) throw error;
+  if(!data){
+    const { error:insErr } = await window.sb.from('user_app_state').insert({
+      user_id:user.id,
+      app_state:{ courses:{}, selectedCourseId:null, selectedDate: todayStr() },
+      teacher_profile:{ name:'', article:'la' }
+    });
+    if(insErr) throw insErr;
+  }
+}
+function isEmptyAppState(st){
+  return !st || !st.courses || Object.keys(st.courses).length === 0;
+}
+async function sbLoadRemoteData(){
+  const user = await sbGetUser();
+  if(!user) throw new Error('No hay sesión');
+  const { data, error } = await window.sb.from('user_app_state').select('app_state, teacher_profile').eq('user_id', user.id).single();
+  if(error) throw error;
+  const rawState = data?.app_state || {};
+  return {
+    state:{
+      courses: rawState.courses || {},
+      selectedCourseId: rawState.selectedCourseId || null,
+      selectedDate: todayStr()
+    },
+    teacher: data?.teacher_profile || { name:'', article:'la' },
+    remoteEmpty: isEmptyAppState(rawState)
+  };
+}
+async function sbSaveRemoteState(state, teacher){
+  const user = await sbGetUser();
+  if(!user) return;
+  const { error } = await window.sb.from('user_app_state').upsert({
+    user_id:user.id,
+    app_state:{ courses:state?.courses || {}, selectedCourseId:state?.selectedCourseId || null, selectedDate: state?.selectedDate || todayStr() },
+    teacher_profile:{ name: teacher?.name || '', article: teacher?.article || 'la' }
+  }, { onConflict:'user_id' });
+  if(error) throw error;
+}
 
 // ====== Auth helpers ======
 const SESSION_KEY = 'session_user_v1';
@@ -129,21 +178,63 @@ function LoginScreen({ onLogin }){
     ev && ev.preventDefault();
     setError(''); setLoading(true);
     try {
-      await sbSignIn(usuario, password);
-      const user = await sbGetUser();
-      saveSession({ usuario: user?.email || usuario, correo: user?.email || usuario });
+      if(hasSupabase()){
+        await sbSignIn(usuario, password);
+        const user = await sbGetUser();
+        saveSession({ usuario: user?.email || usuario, correo: user?.email || usuario });
+      } else {
+        const users = await fetchUsers();
+        const found = users.find(u => (u.usuario||'').toLowerCase() === (usuario||'').toLowerCase());
+        if(!found){ setError('Usuario no encontrado.'); return; }
+        if(String(found.contrasena||'') !== String(password||'')){ setError('Contraseña incorrecta.'); return; }
+        saveSession({ usuario: found.usuario, correo: found.correo || '' });
+      }
       onLogin && onLogin();
     } catch(err){
-      setError(err?.message || 'No se pudo iniciar sesión.');
-    } finally { setLoading(false); }
+      setError(err && err.message ? err.message : 'No se pudo iniciar sesión.');
+    } finally {
+      setLoading(false);
+    }
   }
 
   function forgotPassword(){
-    const correo = (prompt('Ingresá tu correo (el mismo con el que iniciás sesión):', usuario) || '').trim();
-    if(!correo) return;
-    sbResetPassword(correo).then(()=> alert('Te enviamos un correo para restablecer tu contraseña.')).catch(err=> alert('No se pudo enviar el mail: ' + (err?.message || 'error')));
+    if(hasSupabase()){
+      const correo = (prompt('Ingresá tu correo (el mismo con el que iniciás sesión):', usuario) || '').trim();
+      if(!correo) return;
+      sbResetPassword(correo)
+        .then(()=> alert('Te enviamos un correo para restablecer tu contraseña.'))
+        .catch(err => alert('No se pudo enviar el mail: ' + ((err && err.message) || 'error')));
+      return;
+    }
+    const api = (window.PASSWORD_API_URL || '').trim();
+    if(api){
+      const correo = prompt('Ingresá tu correo (para enviarte un código):') || '';
+      if(!correo) return;
+      fetch(api, { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body: new URLSearchParams({ action:'recover', usuario, correo }).toString() })
+        .then(async r => { try{ const j = await r.json(); if(j.status==='ok'){ alert('Listo: revisá tu correo / nueva clave enviada.'); } else { alert('No se pudo procesar: ' + (j.message||'error')); } } catch(_){ alert('Pedido enviado. Si es correcto, recibirás instrucciones.'); } })
+        .catch(()=> alert('No se pudo contactar al servidor.'));
+    } else {
+      AdminMailLink('Recuperar contraseña', `Usuario: ${usuario}\nCorreo: (completá aquí)\n\nSolicito recuperar la contraseña.`);
+    }
   }
-  function changePassword(){ alert('Usá “Olvidé mi contraseña” para cambiar la clave desde Supabase.'); }
+
+  function changePassword(){
+    if(hasSupabase()){
+      alert('Usá “Olvidé mi contraseña” para cambiar la clave desde Supabase.');
+      return;
+    }
+    const api = (window.PASSWORD_API_URL || '').trim();
+    if(api){
+      const actual = prompt('Tu contraseña actual:') || '';
+      const nueva = prompt('Nueva contraseña:') || '';
+      if(!nueva) return;
+      fetch(api, { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body: new URLSearchParams({ action:'change', usuario, password_actual: actual, password_nueva: nueva }).toString() })
+        .then(async r => { try{ const j = await r.json(); if(j.status==='ok'){ alert('Contraseña cambiada. Volvé a iniciar sesión.'); clearSession(); location.reload(); } else { alert('No se pudo cambiar: ' + (j.message||'error')); } } catch(_){ alert('Solicitud enviada. Si es correcta, se aplicará el cambio.'); } })
+        .catch(()=> alert('No se pudo contactar al servidor.'));
+    } else {
+      AdminMailLink('Cambiar contraseña', `Usuario: ${usuario}\n\nSolicito cambiar mi contraseña.`);
+    }
+  }
 
   return e('div', { className:'min-h-dvh flex items-center justify-center p-6' },
     e('div', { className:'w-full max-w-sm bg-white rounded-3xl border shadow p-6', style:{ borderColor:'#d7dbe0' } },
@@ -153,7 +244,7 @@ function LoginScreen({ onLogin }){
       ),
       e('form', { onSubmit:submit, className:'space-y-3' },
         e('div', null,
-          e('label', { className:'block text-sm mb-1', style:{color:'#24496e'} }, 'Correo'),
+          e('label', { className:'block text-sm mb-1', style:{color:'#24496e'} }, 'Usuario'),
           e('input', { value:usuario, onChange:e=>setUsuario(e.target.value), className:'w-full px-3 py-2 border rounded-xl', style:{borderColor:'#d7dbe0'}, autoFocus:true })
         ),
         e('div', null,
@@ -228,50 +319,565 @@ function ChangePasswordPanel({ usuario, onClose }){
 }
 
 function AppShell(){
-  const [sess, setSess] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [sess, setSess] = useState(loadSession());
+  const [loading, setLoading] = useState(!!hasSupabase());
 
   useEffect(() => {
+    if(!hasSupabase()) return;
     let mounted = true;
-    if(!hasSupabase()){ setLoading(false); return; }
     window.sb.auth.getSession().then(({ data }) => {
       if(!mounted) return;
-      const session = data?.session || null;
-      if(session) saveSession({ usuario: session.user?.email || '', correo: session.user?.email || '' }); else clearSession();
-      setSess(session);
+      const session = (data && data.session) || null;
+      if(session){
+        saveSession({ usuario: session.user?.email || '', correo: session.user?.email || '' });
+        setSess({ usuario: session.user?.email || '', correo: session.user?.email || '' });
+      } else {
+        clearSession();
+        setSess(null);
+      }
       setLoading(false);
     }).catch(() => setLoading(false));
-    const sub = window.sb.auth.onAuthStateChange((_event, session) => {
-      if(session) saveSession({ usuario: session.user?.email || '', correo: session.user?.email || '' }); else clearSession();
-      setSess(session || null);
+    const listener = window.sb.auth.onAuthStateChange((_ev, session) => {
+      if(session){
+        saveSession({ usuario: session.user?.email || '', correo: session.user?.email || '' });
+        setSess({ usuario: session.user?.email || '', correo: session.user?.email || '' });
+      } else {
+        clearSession();
+        setSess(null);
+      }
       setLoading(false);
     });
-    return () => { mounted = false; try { sub?.data?.subscription?.unsubscribe?.(); } catch(_){} };
+    return () => { mounted = false; try { listener?.data?.subscription?.unsubscribe?.(); } catch(_){} };
   }, []);
 
-  async function handleLogout(){ try{ await sbSignOut(); }catch(_){} clearSession(); setSess(null); }
+  async function handleLogout(){
+    try { if(hasSupabase()) await sbSignOut(); } catch(_){}
+    clearSession(); setSess(null);
+  }
+  function handleLogged(){ setSess(loadSession()); }
 
-  if(loading){ return e('div', { className:'min-h-dvh flex items-center justify-center p-6 text-slate-700' }, 'Cargando...'); }
-  if(!hasSupabase()){
-    return e('div', { className:'min-h-dvh flex items-center justify-center p-6' },
-      e('div', { className:'w-full max-w-md bg-white rounded-3xl border shadow p-6 text-sm', style:{ borderColor:'#d7dbe0' } },
-        e('div', { className:'font-semibold mb-2', style:{ color:'#24496e' } }, 'Configurar Supabase'),
-        e('div', { className:'text-slate-700' }, 'Completá SUPABASE_URL y SUPABASE_ANON_KEY en index.html para habilitar el login y la sincronización.')
-      )
-    );
+  if(loading){
+    return e('div', { className:'min-h-dvh flex items-center justify-center text-slate-600' }, 'Cargando...');
   }
 
   return sess
     ? e('div', null,
         e('div', { className:'w-full flex justify-end p-2 text-sm' },
           e('div', { className:'flex items-center gap-2 text-slate-700' },
-            e('span', null, sess.user?.email || ''),
+            e('span', null, sess.usuario || ''),
             e('button', { onClick:handleLogout, className:'px-2 py-1 rounded', style:{ background:'#f3efdc', color:'#24496e' } }, 'Cerrar sesión')
           )
         ),
         e(App, { session: sess })
       )
-    : e(LoginScreen, { onLogin: () => {} });
+    : e(LoginScreen, { onLogin: handleLogged });
+}
+
+
+// ===== UI =====
+
+function Header({ selectedDate, onChangeDate }) {
+  return e('header',
+    { className: 'w-full p-4 md:p-6 text-white flex items-center justify-between sticky top-0 z-10 shadow',
+      style:{ background:'#24496e' } },
+    e('div', { className:'flex flex-col gap-1' },
+      e('div', { className:'flex items-center gap-3' },
+        e('span', { className:'text-2xl md:text-3xl font-bold tracking-tight' }, 'Asistencia de Estudiantes')
+      ),
+      e('a', { href:'https://www.instagram.com/docentesbrown', target:'_blank', rel:'noopener',
+               className:'text-xs md:text-sm underline', style:{ opacity:.9 } }, 'creado por @docentesbrown')
+    ),
+    e('div', { className:'flex items-center gap-2' },
+      e('label', { className:'text-sm opacity-90 hidden md:block' }, 'Fecha:'),
+      e('input', { type:'date', value:selectedDate,
+        onChange:(ev)=>onChangeDate(ev.target.value),
+        className:'rounded-md px-2 py-1 text-sm', style:{ color:'#24496e' } })
+    )
+  );
+}
+
+function EmptyState({ onCreateCourse }) {
+  return e('div', { className:'p-6 md:p-10 text-center' },
+    e('h2', { className:'text-xl md:text-2xl font-semibold mb-2', style:{ color:'#24496e' } }, 'No hay cursos aún'),
+    e('p', { className:'text-slate-700 mb-4' }, 'Creá tu primer curso para comenzar.'),
+    e('button', { onClick:onCreateCourse, className:'px-4 py-2 rounded-2xl text-white shadow', style:{ background:'#6c467e' } }, '+ Nuevo curso')
+  );
+}
+
+function CoursesBar({ courses, selectedCourseId, onSelect, onCreate, onRename, onDelete }) {
+  const [renamingId, setRenamingId] = useState(null);
+  const [newName, setNewName]   = useState('');
+  return e('div', { className:'w-full overflow-x-auto border-b border-slate-300 bg-white' },
+    e('div', { className:'flex items-center gap-2 p-3 min-w-max' },
+      ...Object.values(courses).map((c) =>
+        e('div', { key:c.id, className:'flex items-center gap-2 px-3 py-2 rounded-2xl border',
+          style: selectedCourseId===c.id ? { borderColor:'#24496e', background:'#f0f4f8' } : { borderColor:'#d7dbe0' } },
+          renamingId===c.id
+            ? e('input', { autoFocus:true, value:newName, onChange:(ev)=>setNewName(ev.target.value),
+                onBlur:()=>{ onRename(c.id, newName || c.name); setRenamingId(null); },
+                onKeyDown:(ev)=>{ if(ev.key==='Enter'){ onRename(c.id, newName||c.name); setRenamingId(null); } if(ev.key==='Escape'){ setRenamingId(null); } },
+                className:'px-2 py-1 text-sm border rounded', style:{ borderColor:'#d7dbe0' } })
+            : e('button', { className:'text-sm font-medium', style:{ color: selectedCourseId===c.id ? '#24496e' : '#334155' }, onClick:()=>onSelect(c.id) }, c.name),
+          e('div', { className:'flex items-center gap-1' },
+            e('button', { title:'Renombrar', onClick:()=>{ setRenamingId(c.id); setNewName(c.name); },
+              className:'text-xs px-2 py-1 rounded', style:{ background:'#f3efdc', color:'#24496e' } }, '✎'),
+            e('button', { title:'Eliminar curso', onClick:()=>onDelete(c.id),
+              className:'text-xs px-2 py-1 rounded', style:{ background:'#fde2e0', color:'#da6863' } }, '🗑')
+          )
+        )
+      ),
+      e('button', { onClick:onCreate, className:'px-3 py-2 rounded-2xl text-sm', style:{ background:'#f3efdc', color:'#24496e' } }, '+ Nuevo curso')
+    )
+  );
+}
+
+function StudentsTable({ course, students, onAdd, onEdit, onDelete, onShowAbsences, onOpenGrades, onNotifyPreceptor }) {
+  const [cond, setCond] = useState('cursa');
+  const [name, setName] = useState('');
+  const sorted = useMemo(() => Object.values(students).sort((a,b)=>a.name.localeCompare(b.name)), [students]);
+  return e('div', { className:'p-4 md:p-6' },
+    e('div', { className:'flex flex-col md:flex-row gap-2 md:items-end mb-4' },
+      e('div', { className:'flex-1' },
+        e('label', { className:'block text-sm font-medium mb-1', style:{ color:'#24496e' } }, 'Agregar estudiante'),
+        e('input', { placeholder:'Nombre y apellido', value:name, onChange:(ev)=>setName(ev.target.value),
+          className:'w-full max-w-md px-3 py-2 border rounded-xl', style:{ borderColor:'#d7dbe0' } })
+      ),
+      e('div', { className:'flex items-center gap-2' },
+        e('select', { value:cond, onChange:(ev)=>setCond(ev.target.value), className:'px-3 py-2 border rounded-xl', style:{ borderColor:'#d7dbe0' } },
+          e('option', {value:'cursa'}, 'Cursa'),
+          e('option', {value:'recursa'}, 'Recursa')
+        )
+      ),
+      e('button', { onClick:()=>{ if(!name.trim()) return; onAdd(name.trim(), cond); setName(''); },
+        className:'px-4 py-2 rounded-xl text-white', style:{ background:'#6c467e' } }, '+ Agregar')
+    ),
+    e('div', { className:'overflow-x-auto' },
+      e('table', { className:'w-full text-left border rounded-xl overflow-hidden', style:{ borderColor:'#cbd5e1' } },
+        e('thead', { style:{ background:'#24496e', color:'#ffffff' } },
+          e('tr', null,
+            e('th', { className:'p-3 text-sm' }, 'Estudiante'),
+            e('th', { className:'p-3 text-sm' }, '% Asistencia'),
+            e('th', { className:'p-3 text-sm' }, 'Presente'),
+            e('th', { className:'p-3 text-sm' }, 'Ausente'),
+            e('th', { className:'p-3 text-sm' }, 'Promedio'),
+            e('th', { className:'p-3 text-sm' }),             // columna de riesgo (opcional)
+            e('th', { className:'p-3 text-sm' }, 'Notas')     // título pedido
+          )
+        ),
+        e('tbody', null,
+          ...(sorted.length
+            ? sorted.map((s, idx) => {
+                const st = safeStats(s.stats);
+                const rowBg = idx % 2 === 0 ? '#ffffff' : '#f3efdc';
+                const promedio = avg(s.grades||[]);
+                const attendancePct = pct(st);
+                const isLowAttendance = attendancePct < 15;
+                const isRisk = attendancePct < 85 && promedio < 7;
+                return e('tr', { key:s.id, style:{ background:rowBg, borderTop:'1px solid #cbd5e1' } },
+                  e('td', { className:'p-3' },
+                    e('div', { className:'flex items-center gap-2' },
+                      e('span', { className:'font-medium' }, s.name),
+                      (s.condition ? e('span', { className:'text-[10px] px-2 py-0.5 rounded-full',
+                        style:{ background: s.condition==='recursa' ? '#fde2e0' : '#e8f7ef', color: s.condition==='recursa' ? '#da6863' : '#166534' } },
+                        s.condition==='recursa' ? 'Recursa' : 'Cursa') : null),
+                      e('button', { onClick:()=>{
+                          const nuevo = prompt('Editar nombre', s.name) || s.name;
+                          const cond = prompt('Condición (cursa/recursa)', s.condition || 'cursa') || (s.condition || 'cursa');
+                          const norm = (cond||'').toLowerCase()==='recursa' ? 'recursa' : 'cursa';
+                          onEdit(s.id, { name: nuevo.trim(), condition: norm });
+                        },
+                        className:'text-xs px-2 py-1 rounded', style:{ background:'#f3efdc', color:'#24496e' } }, 'Editar')
+                    )
+                  ),
+                  e('td', { className:'p-3 font-semibold',
+                    style: isLowAttendance
+                      ? { background:'#fdecea', color:'#991b1b', borderRadius:'8px' }
+                      : { color:'#24496e' } }, attendancePct + '%'),
+                  e('td', { className:'p-3' }, st.present || 0),
+                  e('td', { className:'p-3' },
+                    e('div', { className:'flex items-center gap-2' },
+                      e('span', null, st.absent || 0),
+                      e('button', { onClick:()=>onShowAbsences(s), className:'text-xs px-2 py-1 rounded',
+                        style:{ background:'#f3efdc', color:'#24496e' } }, 'Fechas')
+                    )
+                  ),
+                  e('td', { className:'p-3 font-semibold', style:{ color:'#24496e' } }, promedio.toFixed(2)),
+                  e('td', { className:'p-3' },
+                    isRisk
+                      ? e('div', { className:'flex items-center gap-2' },
+                          e('span', { className:'text-[11px] font-semibold', style:{ color:'#991b1b' } }, 'Riesgo Pedagógico'),
+                          (course?.preceptor?.phone
+                            ? e('button', {
+                                className:'text-xs px-2 py-1 rounded',
+                                style:{ background:'#f0eaf5', color:'#6c467e' },
+                                onClick:()=>onNotifyPreceptor(s, attendancePct, promedio)
+                              }, 'Avisar')
+                            : null)
+                        )
+                      : null
+                  ),
+                  e('td', { className:'p-3 text-right' },
+                    e('div', {className:'flex gap-2 justify-end'},
+                      e('button', { onClick:()=>onOpenGrades(s), className:'text-xs px-3 py-1 rounded',
+                        style:{ background:'#f0eaf5', color:'#6c467e' } }, 'Notas'),
+                      e('button', { onClick:()=>{ if(confirm('¿Eliminar estudiante y sus datos?')) onDelete(s.id); },
+                        className:'text-xs px-3 py-1 rounded', style:{ background:'#fde2e0', color:'#da6863' } }, 'Eliminar')
+                    )
+                  )
+                );
+              })
+            : [e('tr', { key:'empty' }, e('td', { colSpan:7, className:'p-4 text-center text-slate-500' }, 'Sin estudiantes.'))]
+          )
+        )
+      )
+    )
+  );
+}
+
+function RollCallCard({ students, onMark, onUndo, selectedDate }) {
+  const [order, setOrder] = useState(students.map(s => s.id));
+  const [index, setIndex] = useState(0);
+  const [ops, setOps] = useState([]);
+
+  useEffect(() => { setOrder(students.map(s => s.id)); setIndex(0); setOps([]); }, [students.map(s => s.id).join('|')]);
+
+  const currentId = order[index];
+  const current = students.find(s => s.id === currentId) || null;
+
+  function handleAction(action){
+    if(!current) return;
+    onMark(current.id, action, selectedDate);
+    if (action === 'later') {
+      const from = index;
+      const newOrder = order.slice();
+      const [m] = newOrder.splice(from, 1);
+      newOrder.push(m);
+      setOrder(newOrder);
+      setOps(ops => ops.concat([{ id: current.id, action, type:'mark', fromIndex: from, toIndex: newOrder.length - 1 }]));
+      return;
+    }
+    const from = index;
+    setOps(ops => ops.concat([{ id: current.id, action, type:'mark', fromIndex: from, toIndex: from }]));
+    setIndex(i => Math.min(i + 1, order.length));
+  }
+
+  function goBack(){
+    if (ops.length === 0) return;
+    const last = ops[ops.length - 1];
+    onUndo(last.id, last.action, selectedDate);
+    if (last.action === 'later' && typeof last.fromIndex === 'number' && typeof last.toIndex === 'number') {
+      const newOrder = order.slice();
+      const [m] = newOrder.splice(last.toIndex, 1);
+      newOrder.splice(last.fromIndex, 0, m);
+      setOrder(newOrder);
+      setIndex(last.fromIndex);
+    } else {
+      setIndex(i => Math.max(0, i - 1));
+    }
+    setOps(arr => arr.slice(0, -1));
+  }
+
+  if (!students.length) return e('div', { className:'p-6 text-center text-slate-600' }, 'No hay estudiantes en este curso.');
+
+  const cardPos = Math.min(index + 1, order.length);
+  return e('div', { className:'p-4 md:p-6' },
+    e('div', { className:'max-w-xl mx-auto' },
+      e('div', { className:'mb-3 text-sm text-slate-600 text-center' }, `Tarjeta ${cardPos} / ${order.length}`),
+      current
+        ? e('div', { className:'rounded-3xl border shadow p-6 md:p-8 bg-white', style:{ borderColor:'#d7dbe0' } },
+            e('div', { className:'text-center mb-6' },
+              e('div', { className:'text-2xl md:4xl font-bold tracking-tight mb-2', style:{ color:'#24496e' } }, current.name),
+              e('div', { className:'text-sm md:text-base text-slate-700' }, 'Asistencia acumulada: ',
+                e('span', { className:'font-semibold', style:{ color:'#24496e' } }, pct(current.stats) + '%'),
+                ' · Fecha sesión: ', e('span', { className:'font-semibold', style:{ color:'#24496e' } }, selectedDate)
+              )
+            ),
+            e('div', { className:'grid grid-cols-2 gap-3 md:gap-4' },
+              e('button', { onClick:()=>handleAction('present'), className:'py-3 md:py-4 rounded-2xl font-semibold border',
+                style:{ background:'#e8f7ef', borderColor:'#cdebdc', color:'#166534' } }, 'Presente ✅'),
+              e('button', { onClick:()=>handleAction('absent'), className:'py-3 md:py-4 rounded-2xl font-semibold border',
+                style:{ background:'#fdecea', borderColor:'#f7d7d3', color:'#991b1b' } }, 'Ausente ❌'),
+              e('button', { onClick:()=>handleAction('later'), className:'py-3 md:py-4 rounded-2xl font-semibold border col-span-2',
+                style:{ background:'#f0eaf5', borderColor:'#e2d7ec', color:'#6c467e' } }, 'Revisar más tarde ⏳'),
+              e('button', { onClick:goBack, className:'py-2 md:py-2.5 rounded-xl font-medium col-span-2',
+                style:{ background:'#f3efdc', color:'#24496e' } }, '← Volver al anterior (deshacer)')
+            )
+          )
+        : e('div', { className:'rounded-3xl border shadow p-6 md:p-8 bg-white text-center', style:{ borderColor:'#d7dbe0' } },
+            e('div', { className:'text-xl font-semibold mb-2', style:{ color:'#24496e' } }, '¡Lista completada!'),
+            e('div', { className:'text-slate-700' }, 'Ya asignaste estado a todos.')
+          )
+    )
+  );
+}
+
+// Modal base
+function Modal({ open, title, onClose, children }) {
+  if (!open) return null;
+  return e('div', { className:'fixed inset-0 z-50 flex items-end sm:items-center justify-center' },
+    e('div', { className:'absolute inset-0', onClick:onClose, style:{ background:'rgba(0,0,0,.4)' } }),
+    e('div', { className:'relative w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-lg p-4 sm:p-6 m-0 sm:m-4', style:{ background:'#ffffff', border:'1px solid #d7dbe0' } },
+      e('div', { className:'flex items-center justify-between mb-3' },
+        e('h3', { className:'text-lg font-semibold', style:{ color:'#24496e' } }, title),
+        e('button', { onClick:onClose, className:'px-2 py-1 rounded', style:{ background:'#f3efdc', color:'#24496e' } }, '✕')
+      ),
+      e('div', null, children)
+    )
+  );
+}
+
+// Modal de calificaciones
+function GradesModal({ open, student, onClose, onAdd, onEdit, onDelete }) {
+  const [tipo, setTipo] = useState('escrito');
+  const [date, setDate] = useState(todayStr());
+  const [value, setValue] = useState('');
+  useEffect(() => { if (open) { setTipo('escrito'); setDate(todayStr()); setValue(''); } }, [open]);
+  if(!open || !student) return null;
+
+  const grades = (student.grades||[]).slice().sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+  const promedio = avg(grades);
+
+  return e(Modal, { open, title:`Calificaciones – ${student.name}`, onClose },
+    e('div', { className:'space-y-4' },
+      e('div', { className:'grid grid-cols-1 sm:grid-cols-3 gap-2' },
+        e('input', { type:'date', className:'px-3 py-2 border rounded-xl', style:{borderColor:'#d7dbe0'},
+          value:date, onChange:(ev)=>setDate(ev.target.value)}),
+        e('select', { value:tipo, onChange:(ev)=>setTipo(ev.target.value), className:'px-3 py-2 border rounded-xl', style:{borderColor:'#d7dbe0'} },
+          e('option', {value:'escrito'}, 'Escrito'),
+          e('option', {value:'oral'}, 'Oral'),
+          e('option', {value:'practico'}, 'Práctico'),
+          e('option', {value:'conceptual'}, 'Conceptual')
+        ),
+        e('input', { type:'number', step:'0.01', className:'px-3 py-2 border rounded-xl', style:{borderColor:'#d7dbe0'},
+          placeholder:'Nota', value:value, onChange:(ev)=>setValue(ev.target.value)}),
+      ),
+      e('div', null,
+        e('button', { onClick:()=>{
+            const v = Number(value);
+            if(Number.isNaN(v)) { alert('Ingresá una nota numérica.'); return; }
+            onAdd({ id: uid('nota'), tipo, date: date || todayStr(), value: v });
+            setValue('');
+          },
+          className:'px-4 py-2 rounded-xl text-white', style:{background:'#6c467e'}
+        }, '+ Agregar nota')
+      ),
+      e('div', { className:'text-sm text-slate-700' }, `Promedio: `, e('strong', {style:{color:'#24496e'}}, promedio.toFixed(2))),
+      e('div', { className:'max-h-64 overflow-auto border rounded-xl', style:{borderColor:'#d7dbe0'} },
+        e('table', { className:'w-full text-left' },
+          e('thead', { style:{background:'#24496e', color:'#fff'} },
+            e('tr', null,
+              e('th', {className:'p-2 text-sm'}, 'Fecha'),
+              e('th', {className:'p-2 text-sm'}, 'Tipo'),
+              e('th', {className:'p-2 text-sm'}, 'Nota'),
+              e('th', {className:'p-2 text-sm'})
+            )
+          ),
+          e('tbody', null,
+            ...(grades.length ? grades.map(g =>
+              e('tr', {key:g.id, className:'border-t', style:{borderColor:'#e2e8f0'}},
+                e('td', {className:'p-2'}, g.date || ''),
+                e('td', {className:'p-2'}, (g.tipo ? (g.tipo.charAt(0).toUpperCase()+g.tipo.slice(1)) : '')),
+                e('td', {className:'p-2'}, String(g.value)),
+                e('td', {className:'p-2 text-right'},
+                  e('button', { className:'text-xs px-2 py-1 rounded mr-2', style:{background:'#f3efdc', color:'#24496e'},
+                    onClick:()=>{
+                      const newDate = prompt('Editar fecha (YYYY-MM-DD)', g.date || todayStr()) ?? g.date;
+                      const newTipo = prompt('Editar tipo (escrito/oral/practico/conceptual)', g.tipo || 'escrito') ?? g.tipo;
+                      const newValueRaw = prompt('Editar nota', String(g.value));
+                      const nv = Number(newValueRaw);
+                      if(Number.isNaN(nv)) return;
+                      onEdit({ ...g, date:newDate, tipo:newTipo, value:nv });
+                    }
+                  }, 'Editar'),
+                  e('button', { className:'text-xs px-2 py-1 rounded', style:{background:'#fde2e0', color:'#da6863'},
+                    onClick:()=>onDelete(g.id)
+                  }, 'Eliminar')
+                )
+              )
+            ) : [e('tr', {key:'empty'}, e('td', {colSpan:4, className:'p-2 text-center text-slate-500'}, 'Sin notas todavía.'))])
+          )
+        )
+      )
+    )
+  );
+}
+
+// Modal de inasistencias
+function AbsencesModal({ open, student, onClose, onApplyChange }) {
+  const [choices, setChoices] = useState({}); // histId -> reason
+  useEffect(()=>{ setChoices({}); }, [open, student && student.id]);
+
+  if(!open || !student) return null;
+  const history = (student.history || []).map(h => h.id ? h : Object.assign({}, h, { id: uid('hist') }));
+  const rows = history
+    .filter(h => h.status === 'absent' || h.status === 'tarde')
+    .slice()
+    .sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+
+  const totalAusentes = rows.filter(r => r.status === 'absent').length;
+
+  function labelFor(r){
+    if(r.status === 'tarde') return 'Tarde';
+    if(r.status === 'absent' && r.reason === 'justificada') return 'Justificada';
+    return 'Ausente';
+    }
+
+  return e(Modal, { open, title:`Inasistencias – ${student.name}`, onClose },
+    e('div', null,
+      e('div', { className:'mb-3 text-sm text-slate-700' },
+        'Total de ausencias: ',
+        e('strong', {style:{color:'#24496e'}}, totalAusentes)
+      ),
+      e('div', { className:'max-h-72 overflow-auto border rounded-xl', style:{borderColor:'#d7dbe0'} },
+        e('table', { className:'w-full text-left' },
+          e('thead', { style:{background:'#24496e', color:'#fff'} },
+            e('tr', null,
+              e('th', {className:'p-2 text-sm'}, 'Fecha'),
+              e('th', {className:'p-2 text-sm'}, 'Estado'),
+              e('th', {className:'p-2 text-sm'}, 'Cambiar a'),
+              e('th', {className:'p-2 text-sm'})
+            )
+          ),
+          e('tbody', null,
+            ...(rows.length ? rows.map((r) =>
+              e('tr', { key:r.id, className:'border-t', style:{borderColor:'#e2e8f0'} },
+                e('td', { className:'p-2' }, r.date || ''),
+                e('td', { className:'p-2' }, labelFor(r)),
+                e('td', { className:'p-2' },
+                  e('select', {
+                    className:'px-2 py-1 border rounded', style:{borderColor:'#d7dbe0'},
+                    value:choices[r.id] || '',
+                    onChange:(ev)=> setChoices(ch => Object.assign({}, ch, { [r.id]: ev.target.value }))
+                  },
+                    e('option', {value:''}, 'Seleccionar...'),
+                    e('option', {value:'tarde'}, 'Tarde'),
+                    e('option', {value:'justificada'}, 'Justificada'),
+                    e('option', {value:'erronea'}, 'Errónea (eliminar)')
+                  )
+                ),
+                e('td', { className:'p-2 text-right' },
+                  e('button', {
+                    className:'text-xs px-2 py-1 rounded',
+                    style:{background:'#fde2e0', color:'#da6863'},
+                    onClick:()=>{
+                      const ch = choices[r.id];
+                      if(!ch){ alert('Elegí una opción en "Cambiar a".'); return; }
+                      onApplyChange(r.id, ch);
+                    }
+                  }, 'Aplicar')
+                )
+              )
+            ) : [e('tr', { key:'empty' }, e('td', { colSpan:4, className:'p-2 text-center text-slate-500' }, 'Sin registros.'))])
+          )
+        )
+      )
+    )
+  );
+}
+
+// Modal de Exportar/Importar
+function ExportModal({ open, onClose, onExportJSON, onImportJSON, onExportXLSX }){
+  const fileRef = useRef(null);
+  function handleFile(ev){
+    const file = ev.target.files && ev.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = () => { try { onImportJSON(reader.result); } finally { ev.target.value=''; } };
+    reader.readAsText(file);
+  }
+  if(!open) return null;
+  return e(Modal, { open, title:'Exportar / Importar', onClose },
+    e('div', { className:'grid grid-cols-1 gap-3' },
+      e('button', { onClick:onExportXLSX, className:'px-4 py-2 rounded-xl text-white font-semibold', style:{ background:'#24496e' } }, 'Exportar .xlsx'),
+      e('button', { onClick:onExportJSON, className:'px-4 py-2 rounded-xl font-semibold', style:{ background:'#f3efdc', color:'#24496e' } }, 'Exportar a PC (.json)'),
+      e('button', { onClick:()=> (fileRef.current && fileRef.current.click()), className:'px-4 py-2 rounded-xl font-semibold', style:{ background:'#f3efdc', color:'#24496e' } }, 'Importar desde PC (.json)'),
+      e('input', { ref:fileRef, type:'file', accept:'.json,application/json', className:'hidden', onChange:handleFile })
+    )
+  );
+}
+
+// Modal de nuevo curso
+function NewCourseModal({ open, onClose, onCreate }){
+  const [name, setName] = useState('');
+  const [days, setDays] = useState({ lun:false, mar:false, mie:false, jue:false, vie:false, sab:false });
+  const [preceptorName, setPreceptorName] = useState('');
+  const [preceptorPhone, setPreceptorPhone] = useState('');
+  function toggleDay(k){ setDays(d => Object.assign({}, d, { [k]: !d[k] })); }
+  function submit(){
+    if(!name.trim()) { alert('Poné un nombre para el curso.'); return; }
+    const selectedDays = Object.entries(days).filter(([k,v])=>v).map(([k])=>k);
+    onCreate({
+      name: name.trim(),
+      days: selectedDays,
+      preceptor: { name: preceptorName.trim(), phone: sanitizePhone(preceptorPhone) }
+    });
+    setName(''); setDays({ lun:false, mar:false, mie:false, jue:false, vie:false, sab:false });
+    setPreceptorName(''); setPreceptorPhone('');
+    onClose();
+  }
+  if(!open) return null;
+  return e(Modal, { open, title:'Nuevo curso', onClose },
+    e('div', { className:'space-y-4' },
+      e('div', null,
+        e('label', { className:'block text-sm font-medium mb-1', style:{ color:'#24496e' } }, 'Nombre del curso'),
+        e('input', { value:name, onChange:ev=>setName(ev.target.value), className:'w-full px-3 py-2 border rounded-xl', style:{ borderColor:'#d7dbe0' }, placeholder:'3°B - Matemática' })
+      ),
+      e('div', null,
+        e('div', { className:'block text-sm font-medium mb-1', style:{ color:'#24496e' } }, 'Días del curso'),
+        e('div', { className:'grid grid-cols-3 gap-2' },
+          ...[
+            ['lun','Lunes'], ['mar','Martes'], ['mie','Miércoles'], ['jue','Jueves'], ['vie','Viernes'], ['sab','Sábado']
+          ].map(([k,lab]) =>
+            e('label', { key:k, className:'flex items-center gap-2 text-sm' },
+              e('input', { type:'checkbox', checked:days[k], onChange:()=>toggleDay(k) }),
+              e('span', null, lab)
+            )
+          )
+        )
+      ),
+      e('div', null,
+        e('div', { className:'block text-sm font-medium mb-1', style:{ color:'#24496e' } }, 'Preceptor/a'),
+        e('div', { className:'grid grid-cols-1 sm:grid-cols-2 gap-2' },
+          e('input', { value:preceptorName, onChange:ev=>setPreceptorName(ev.target.value), className:'px-3 py-2 border rounded-xl', style:{ borderColor:'#d7dbe0' }, placeholder:'Nombre' }),
+          e('input', { value:preceptorPhone, onChange:ev=>setPreceptorPhone(ev.target.value), className:'px-3 py-2 border rounded-xl', style:{ borderColor:'#d7dbe0' }, placeholder:'Teléfono (WhatsApp)' })
+        )
+      ),
+      e('div', null,
+        e('button', { onClick:submit, className:'px-4 py-2 rounded-xl text-white font-semibold', style:{ background:'#6c467e' } }, 'Crear curso')
+      )
+    )
+  );
+}
+
+// Modal Perfil del/la profe
+function TeacherProfileModal({ open, onClose, onSave, initial }){
+  const [name, setName] = React.useState(initial?.name || '');
+  const [article, setArticle] = React.useState(initial?.article || 'la');
+  useEffect(() => { if(open){ setName(initial?.name || ''); setArticle(initial?.article || 'la'); } }, [open]);
+  if(!open) return null;
+  return e(Modal, { open, title:'Tu perfil de profe', onClose },
+    e('div', { className:'space-y-4' },
+      e('p', { className:'text-sm text-slate-700' }, 'Usamos estos datos cuando se envía el aviso por WhatsApp al/la preceptor/a.'),
+      e('div', null,
+        e('label', { className:'block text-sm font-medium mb-1', style:{ color:'#24496e' } }, 'Nombre completo'),
+        e('input', { value:name, onChange:ev=>setName(ev.target.value),
+          className:'w-full px-3 py-2 border rounded-xl', style:{ borderColor:'#d7dbe0' }, placeholder:'Ej: Natalia Pérez' })
+      ),
+      e('div', null,
+        e('label', { className:'block text-sm font-medium mb-1', style:{ color:'#24496e' } }, 'Artículo'),
+        e('select', { value:article, onChange:ev=>setArticle(ev.target.value),
+          className:'px-3 py-2 border rounded-xl', style:{ borderColor:'#d7dbe0' } },
+          e('option', {value:'la'}, 'la'),
+          e('option', {value:'el'}, 'el'),
+          e('option', {value:'le'}, 'le')
+        )
+      ),
+      e('div', null,
+        e('button', { onClick:()=>{ onSave({ name:name.trim(), article }); onClose(); },
+          className:'px-4 py-2 rounded-xl text-white font-semibold', style:{ background:'#6c467e' } }, 'Guardar')
+      )
+    )
+  );
 }
 
 // App principal
@@ -284,8 +890,8 @@ function App() {
   // Perfil del/la profe
   const [teacher, setTeacher] = useState(loadTeacher());
   const [teacherOpen, setTeacherOpen] = useState(false);
-  const [remoteReady, setRemoteReady] = useState(false);
-  const [remoteEmpty, setRemoteEmpty] = useState(false);
+  const [remoteReady, setRemoteReady] = useState(!hasSupabase());
+  const [didInitialRemoteLoad, setDidInitialRemoteLoad] = useState(false);
 
   // Modal de notas
   const [gradesOpen, setGradesOpen] = useState(false);
@@ -301,22 +907,34 @@ function App() {
 
   useEffect(() => { saveState(state); }, [state]);
 
-  // Cargar desde Supabase (sin perder respaldo local)
+  // Carga inicial desde Supabase (sin romper datos locales)
   useEffect(() => {
     let mounted = true;
+    if(!hasSupabase()){ setRemoteReady(true); setDidInitialRemoteLoad(true); return; }
     (async () => {
       try {
         await sbEnsureStateRow();
         const remote = await sbLoadRemoteData();
         if(!mounted) return;
-        const remoteCourses = Object.keys(remote?.state?.courses || {}).length;
-        const localCourses = Object.keys(loadState()?.courses || {}).length;
-        if(remote?.state) setState(remote.state);
-        if(remote?.teacher) setTeacher(remote.teacher);
-        if(remoteCourses === 0 && localCourses > 0) setRemoteEmpty(true);
-      } catch(err) {
-        console.warn('No se pudo cargar de Supabase; se usan datos locales.', err);
-      } finally { if(mounted) setRemoteReady(true); }
+        const localState = loadState();
+        const localTeacher = loadTeacher();
+        const localHasData = !isEmptyAppState(localState);
+        if(remote && remote.remoteEmpty && localHasData){
+          const subir = window.confirm('Encontré datos en este dispositivo y la nube está vacía. ¿Querés subir estos datos a tu cuenta?');
+          if(subir){
+            await sbSaveRemoteState(localState, localTeacher);
+          } else {
+            // usar servidor vacío, no hacemos nada
+          }
+        } else {
+          if(remote && remote.state) setState(remote.state);
+          if(remote && remote.teacher) setTeacher(remote.teacher);
+        }
+      } catch(err){
+        console.warn('No se pudo cargar de Supabase, se usan datos locales.', err);
+      } finally {
+        if(mounted){ setRemoteReady(true); setDidInitialRemoteLoad(true); }
+      }
     })();
     return () => { mounted = false; };
   }, []);
@@ -329,28 +947,14 @@ function App() {
   }, []);
   useEffect(() => { if(teacher) saveTeacher(teacher); }, [teacher]);
 
-  // Sincronizar a Supabase (debounce corto)
+  // Guardado remoto con debounce
   useEffect(() => {
-    if(!remoteReady) return;
+    if(!hasSupabase() || !remoteReady || !didInitialRemoteLoad) return;
     const t = setTimeout(() => {
-      sbSaveRemoteState(state, teacher).catch(err => console.warn('No se pudo sincronizar:', err));
+      sbSaveRemoteState(state, teacher).catch(err => console.warn('No se pudo sincronizar con Supabase:', err));
     }, 500);
     return () => clearTimeout(t);
-  }, [state, teacher, remoteReady]);
-
-  // Ofrecer migrar datos locales si la nube está vacía
-  useEffect(() => {
-    if(!remoteReady || !remoteEmpty) return;
-    const k = 'supabase_migracion_ofrecida_v1';
-    if(localStorage.getItem(k)) return;
-    localStorage.setItem(k, '1');
-    setTimeout(() => {
-      const ok = confirm('Se detectaron datos en este dispositivo y la nube está vacía. ¿Querés subir estos datos locales a Supabase?');
-      if(ok){
-        sbSaveRemoteState(state, teacher).then(() => alert('Listo ✅ Datos subidos a la nube.')).catch(err => alert('No se pudo subir: ' + (err?.message || 'error')));
-      }
-    }, 700);
-  }, [remoteReady, remoteEmpty]);
+  }, [state, teacher, remoteReady, didInitialRemoteLoad]);
 
   // Exponer función para abrir Exportar/Importar desde el footer
   useEffect(() => {

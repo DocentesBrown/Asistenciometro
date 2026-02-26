@@ -1,0 +1,1 @@
+Corrección: se restauró app.js completo (el ZIP anterior quedó truncado) y se mantuvo la integración Supabase.
