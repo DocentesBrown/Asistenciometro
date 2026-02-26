@@ -710,14 +710,14 @@ function AbsencesModal({ open, student, onClose, onApplyChange }) {
   if(!open || !student) return null;
   const history = (student.history || []).map(h => h.id ? h : Object.assign({}, h, { id: uid('hist') }));
   const rows = history
-    .filter(h => h.status === 'absent' || h.status === 'tarde')
+    .filter(h => h.status === 'absent' || h.status === 'tarde' || h.status === 'later')
     .slice()
     .sort((a,b)=>(a.date||'').localeCompare(b.date||''));
 
   const totalAusentes = rows.filter(r => r.status === 'absent').length;
 
   function labelFor(r){
-    if(r.status === 'tarde') return 'Tarde';
+    if(r.status === 'tarde' || r.status === 'later') return 'Tarde';
     if(r.status === 'absent' && r.reason === 'justificada') return 'Justificada';
     return 'Ausente';
     }
@@ -1127,36 +1127,53 @@ function App() {
       const st = Object.assign({}, students[studentId]);
       const stats = safeStats(st.stats);
       const hist = (st.history || []).slice();
+
+      // Compatibilidad: algunos historiales viejos no tenían id.
+      // Les asignamos id persistente para que el cambio quede guardado.
+      for (let i = 0; i < hist.length; i++) {
+        if (!hist[i].id) hist[i] = Object.assign({}, hist[i], { id: uid('hist') });
+      }
+
       const idx = hist.findIndex(h => h.id === histId);
       if (idx === -1) return s;
 
       const entry = Object.assign({}, hist[idx]);
+      const currentStatus = entry.status === 'tarde' ? 'later' : entry.status; // normalizar legado
 
       if (reason === 'erronea') {
-        if (entry.status === 'absent' && stats.absent > 0) stats.absent -= 1;
-        if (entry.status === 'tarde'  && stats.later  > 0) stats.later  -= 1;
+        if (currentStatus === 'absent' && (stats.absent || 0) > 0) stats.absent -= 1;
+        if (currentStatus === 'later'  && (stats.later  || 0) > 0) stats.later  -= 1;
 
-        // Reetiquetar como presente y sumar 1 a presentes
+        // Reetiquetar como presente y sumar 1 a presentes (solo si antes no lo era)
+        if (currentStatus !== 'present') stats.present = (stats.present || 0) + 1;
         entry.status = 'present';
         delete entry.reason;
-        stats.present = (stats.present || 0) + 1;
         hist[idx] = entry;
       } else if (reason === 'tarde') {
-        // Contar 'tarde' también como presencia
-        if (entry.status === 'absent') {
-          if (stats.absent > 0) stats.absent -= 1;
+        // Tarde cuenta como presencia
+        if (currentStatus === 'absent' && (stats.absent || 0) > 0) {
+          stats.absent -= 1;
         }
         // Sumar tardanza si aún no lo era
-        if (entry.status !== 'tarde') {
+        if (currentStatus !== 'later') {
           stats.later = (stats.later || 0) + 1;
         }
-        // ✅ Siempre suma 1 a presentes (criterio pedido por Naty)
-        stats.present = (stats.present || 0) + 1;
+        // Sumar presentes solo si venía de ausente (para evitar duplicados al reaplicar)
+        if (currentStatus === 'absent') {
+          stats.present = (stats.present || 0) + 1;
+        }
 
-        entry.status = 'tarde';
+        entry.status = 'later';
         delete entry.reason;
         hist[idx] = entry;
       } else if (reason === 'justificada') {
+        // Sigue contando como ausencia, solo marca el motivo
+        if (currentStatus === 'later') {
+          // Si estaba tarde y la pasan a justificada, revierte tardanza/presencia y pasa a ausencia
+          if ((stats.later || 0) > 0) stats.later -= 1;
+          if ((stats.present || 0) > 0) stats.present -= 1;
+          stats.absent = (stats.absent || 0) + 1;
+        }
         entry.status = 'absent';
         entry.reason = 'justificada';
         hist[idx] = entry;
