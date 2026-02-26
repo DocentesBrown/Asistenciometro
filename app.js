@@ -5,6 +5,20 @@ const e = React.createElement;
 const LS_KEY = 'agenda_estudiantes_sin_google_v5';
 const TEACHER_LS_KEY = 'teacher_profile_v1';
 
+function readStoredSessionSync(){
+  try { return JSON.parse(localStorage.getItem('session_user_v1')) || null; }
+  catch { return null; }
+}
+function localScopeSuffix(){
+  const s = readStoredSessionSync();
+  const raw = (s && (s.correo || s.usuario)) ? String(s.correo || s.usuario) : '';
+  return raw ? raw.trim().toLowerCase() : '';
+}
+function scopedLocalKey(baseKey){
+  const suffix = localScopeSuffix();
+  return suffix ? `${baseKey}__${suffix}` : baseKey;
+}
+
 function uid(prefix) { prefix = prefix || 'id'; return prefix + '_' + Math.random().toString(36).slice(2,9); }
 function safeStats(stats) { return stats && typeof stats === 'object' ? stats : { present:0, absent:0, later:0 }; }
 function pct(stats) { const s = safeStats(stats); const d = (s.present||0) + (s.absent||0); return d ? Math.round((s.present/d)*100) : 0; }
@@ -23,7 +37,7 @@ function avg(arr){
 }
 function loadState() {
   try {
-    const raw = localStorage.getItem(LS_KEY);
+    const raw = localStorage.getItem(scopedLocalKey(LS_KEY));
     const base = { courses:{}, selectedCourseId:null, selectedDate: todayStr() };
     if (!raw) return base;
     const parsed = JSON.parse(raw);
@@ -36,14 +50,14 @@ function loadState() {
     return { courses:{}, selectedCourseId:null, selectedDate: todayStr() };
   }
 }
-function saveState(state){ localStorage.setItem(LS_KEY, JSON.stringify(state)); }
+function saveState(state){ localStorage.setItem(scopedLocalKey(LS_KEY), JSON.stringify(state)); }
 
-// Perfil de profe (dispositivo)
+// Perfil de profe (por usuario/dispositivo)
 function loadTeacher(){
-  try { return JSON.parse(localStorage.getItem(TEACHER_LS_KEY)) || { name:'', article:'la' }; }
+  try { return JSON.parse(localStorage.getItem(scopedLocalKey(TEACHER_LS_KEY))) || { name:'', article:'la' }; }
   catch { return { name:'', article:'la' }; }
 }
-function saveTeacher(t){ localStorage.setItem(TEACHER_LS_KEY, JSON.stringify(t)); }
+function saveTeacher(t){ localStorage.setItem(scopedLocalKey(TEACHER_LS_KEY), JSON.stringify(t)); }
 
 function sanitizePhone(phoneRaw=''){
   // Normaliza números de AR para WhatsApp (wa.me)
@@ -368,7 +382,7 @@ function AppShell(){
             e('button', { onClick:handleLogout, className:'px-2 py-1 rounded', style:{ background:'#f3efdc', color:'#24496e' } }, 'Cerrar sesión')
           )
         ),
-        e(App, { session: sess })
+        e(App, { session: sess, key: (sess && sess.user && sess.user.id) ? sess.user.id : 'app' })
       )
     : e(LoginScreen, { onLogin: handleLogged });
 }
