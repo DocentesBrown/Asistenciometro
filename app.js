@@ -278,9 +278,8 @@ function LoginScreen({ onLogin }){
         ),
         error ? e('div', { className:'text-sm text-red-700 bg-red-50 rounded px-2 py-1' }, error) : null,
         e('button', { type:'submit', disabled:loading, className:'w-full px-4 py-2 rounded-2xl text-white font-semibold', style:{ background:'#6c467e', opacity: loading? .7:1 } }, loading ? 'Ingresando...' : 'Ingresar'),
-        e('div', { className:'flex items-center justify-between text-sm pt-1' },
-          e('button', { type:'button', onClick:forgotPassword, className:'underline', style:{color:'#24496e'} }, 'Olvidé mi contraseña'),
-          e('button', { type:'button', onClick:changePassword, className:'underline', style:{color:'#24496e'} }, 'Cambiar contraseña')
+        e('div', { className:'flex items-center justify-start text-sm pt-1' },
+          e('button', { type:'button', onClick:forgotPassword, className:'underline', style:{color:'#24496e'} }, 'Olvidé mi contraseña')
         )
       )
     )
