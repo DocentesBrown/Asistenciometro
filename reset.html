@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Restablecer contraseña</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    :root{ --azul:#24496e; --crema:#f3efdc; --violeta:#6c467e; }
+    body{ background:var(--crema); }
+  </style>
+</head>
+<body class="min-h-dvh flex items-center justify-center p-4 text-slate-900">
+  <div class="w-full max-w-md bg-white rounded-3xl shadow border p-6" style="border-color:#d7dbe0">
+    <h1 class="text-2xl font-bold text-center" style="color:var(--azul)">Restablecer contraseña</h1>
+    <p class="text-sm text-slate-600 text-center mt-1">Ingresá una nueva clave para tu cuenta.</p>
+
+    <div id="status" class="mt-4 text-sm rounded-xl px-3 py-2 hidden"></div>
+
+    <form id="form" class="mt-4 space-y-3">
+      <div>
+        <label class="block text-sm mb-1" style="color:var(--azul)">Nueva contraseña</label>
+        <input id="password" type="password" class="w-full px-3 py-2 border rounded-xl" style="border-color:#d7dbe0" minlength="6" required />
+      </div>
+      <div>
+        <label class="block text-sm mb-1" style="color:var(--azul)">Repetir contraseña</label>
+        <input id="password2" type="password" class="w-full px-3 py-2 border rounded-xl" style="border-color:#d7dbe0" minlength="6" required />
+      </div>
+      <button id="submitBtn" type="submit" class="w-full px-4 py-2 rounded-2xl text-white font-semibold" style="background:var(--violeta)">Guardar nueva contraseña</button>
+    </form>
+
+    <a id="backLink" href="./index.html" class="block text-center mt-4 underline text-sm" style="color:var(--azul)">Volver al login</a>
+  </div>
+
+  <script>
+    const SUPABASE_URL = "https://elmdavbgxusfaqxpmvyi.supabase.co";
+    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVsbWRhdmJneHVzZmFxeHBtdnlpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIwOTgwOTksImV4cCI6MjA4NzY3NDA5OX0.ahdhhyxb7OG3kQ8QGweYhBlQfZMvgziaKZefWdVv7c8";
+    const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    const statusBox = document.getElementById('status');
+    const form = document.getElementById('form');
+    const submitBtn = document.getElementById('submitBtn');
+
+    function setStatus(msg, ok=false){
+      statusBox.textContent = msg;
+      statusBox.classList.remove('hidden');
+      statusBox.style.background = ok ? '#ecfdf5' : '#fef2f2';
+      statusBox.style.color = ok ? '#065f46' : '#991b1b';
+    }
+
+    async function ensureRecoverySession(){
+      // Supabase puede devolver tokens en hash (#...) o query (?code=...) según flujo
+      const url = new URL(window.location.href);
+      const hash = new URLSearchParams((url.hash || '').replace(/^#/, ''));
+      const query = url.searchParams;
+
+      const access_token = hash.get('access_token') || query.get('access_token');
+      const refresh_token = hash.get('refresh_token') || query.get('refresh_token');
+      const type = hash.get('type') || query.get('type');
+
+      if (access_token && refresh_token) {
+        const { error } = await sb.auth.setSession({ access_token, refresh_token });
+        if (error) throw error;
+      }
+
+      const { data, error } = await sb.auth.getSession();
+      if (error) throw error;
+      if (!data.session) {
+        throw new Error('El enlace no es válido o ya venció. Pedí uno nuevo.');
+      }
+      if (type && type !== 'recovery') {
+        // No bloquear, pero avisar si vino otro tipo de enlace
+        console.warn('Tipo de enlace:', type);
+      }
+      return data.session;
+    }
+
+    (async () => {
+      try {
+        await ensureRecoverySession();
+        setStatus('Enlace válido. Ya podés escribir tu nueva contraseña.', true);
+      } catch (e) {
+        setStatus(e.message || 'No se pudo validar el enlace.');
+        form.style.display = 'none';
+      }
+    })();
+
+    form.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const p1 = document.getElementById('password').value.trim();
+      const p2 = document.getElementById('password2').value.trim();
+      if (p1.length < 6) return setStatus('La contraseña debe tener al menos 6 caracteres.');
+      if (p1 !== p2) return setStatus('Las contraseñas no coinciden.');
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Guardando...';
+      try {
+        const { error } = await sb.auth.updateUser({ password: p1 });
+        if (error) throw error;
+        setStatus('¡Contraseña actualizada! Ya podés volver a iniciar sesión.', true);
+        form.reset();
+        setTimeout(() => { window.location.href = './index.html'; }, 1500);
+      } catch (e) {
+        setStatus(e.message || 'No se pudo actualizar la contraseña.');
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Guardar nueva contraseña';
+      }
+    });
+  </script>
+</body>
+</html>

@@ -94,7 +94,13 @@ async function sbSignIn(email, password){
 async function sbSignOut(){ if(!hasSupabase()) return; const { error } = await window.sb.auth.signOut(); if(error) throw error; }
 async function sbResetPassword(email){
   if(!hasSupabase()) throw new Error('Supabase no configurado.');
-  const { error } = await window.sb.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin + window.location.pathname });
+  const resetUrl = (window.SUPABASE_RESET_REDIRECT_URL || (window.location.origin + window.location.pathname.replace(/[^\/]*$/, '') + 'reset.html'));
+  const { error } = await window.sb.auth.resetPasswordForEmail(email, { redirectTo: resetUrl });
+  if(error) throw error;
+}
+async function sbUpdatePassword(newPassword){
+  if(!hasSupabase()) throw new Error('Supabase no configurado.');
+  const { error } = await window.sb.auth.updateUser({ password: newPassword });
   if(error) throw error;
 }
 async function sbEnsureStateRow(){
@@ -234,7 +240,12 @@ function LoginScreen({ onLogin }){
 
   function changePassword(){
     if(hasSupabase()){
-      alert('Usá “Olvidé mi contraseña” para cambiar la clave desde Supabase.');
+      const nueva = (prompt('Ingresá la nueva contraseña (mínimo 6 caracteres):') || '').trim();
+      if(!nueva) return;
+      if(nueva.length < 6){ alert('La contraseña debe tener al menos 6 caracteres.'); return; }
+      sbUpdatePassword(nueva)
+        .then(()=> alert('Contraseña cambiada correctamente.'))
+        .catch(err => alert('No se pudo cambiar la contraseña: ' + ((err && err.message) || 'error')));
       return;
     }
     const api = (window.PASSWORD_API_URL || '').trim();
