@@ -35,6 +35,19 @@ function avg(arr){
   const s = nums.reduce((a,b)=>a+b,0);
   return Math.round((s/nums.length)*100)/100;
 }
+function getStudentActiveFrom(student){
+  return (student && (student.activeFrom || student.createdAt)) ? String(student.activeFrom || student.createdAt) : '0000-00-00';
+}
+function hasAttendanceOnDate(student, dateStr){
+  return !!((student && student.history) || []).find(h => (h.date || '') === (dateStr || ''));
+}
+function normalizeAttendanceAction(value){
+  const v = String(value || '').trim().toLowerCase();
+  if (['p', 'presente', 'present', 'pres'].includes(v)) return 'present';
+  if (['a', 'ausente', 'absent', 'falta'].includes(v)) return 'absent';
+  if (['t', 'tarde', 'later', 'llegada tarde'].includes(v)) return 'later';
+  return '';
+}
 function loadState() {
   try {
     const raw = localStorage.getItem(scopedLocalKey(LS_KEY));
@@ -94,13 +107,7 @@ async function sbSignIn(email, password){
 async function sbSignOut(){ if(!hasSupabase()) return; const { error } = await window.sb.auth.signOut(); if(error) throw error; }
 async function sbResetPassword(email){
   if(!hasSupabase()) throw new Error('Supabase no configurado.');
-  const resetUrl = (window.SUPABASE_RESET_REDIRECT_URL || (window.location.origin + window.location.pathname.replace(/[^\/]*$/, '') + 'reset.html'));
-  const { error } = await window.sb.auth.resetPasswordForEmail(email, { redirectTo: resetUrl });
-  if(error) throw error;
-}
-async function sbUpdatePassword(newPassword){
-  if(!hasSupabase()) throw new Error('Supabase no configurado.');
-  const { error } = await window.sb.auth.updateUser({ password: newPassword });
+  const { error } = await window.sb.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin + window.location.pathname });
   if(error) throw error;
 }
 async function sbEnsureStateRow(){
@@ -240,12 +247,7 @@ function LoginScreen({ onLogin }){
 
   function changePassword(){
     if(hasSupabase()){
-      const nueva = (prompt('Ingresá la nueva contraseña (mínimo 6 caracteres):') || '').trim();
-      if(!nueva) return;
-      if(nueva.length < 6){ alert('La contraseña debe tener al menos 6 caracteres.'); return; }
-      sbUpdatePassword(nueva)
-        .then(()=> alert('Contraseña cambiada correctamente.'))
-        .catch(err => alert('No se pudo cambiar la contraseña: ' + ((err && err.message) || 'error')));
+      alert('Usá “Olvidé mi contraseña” para cambiar la clave desde Supabase.');
       return;
     }
     const api = (window.PASSWORD_API_URL || '').trim();
@@ -278,8 +280,9 @@ function LoginScreen({ onLogin }){
         ),
         error ? e('div', { className:'text-sm text-red-700 bg-red-50 rounded px-2 py-1' }, error) : null,
         e('button', { type:'submit', disabled:loading, className:'w-full px-4 py-2 rounded-2xl text-white font-semibold', style:{ background:'#6c467e', opacity: loading? .7:1 } }, loading ? 'Ingresando...' : 'Ingresar'),
-        e('div', { className:'flex items-center justify-start text-sm pt-1' },
-          e('button', { type:'button', onClick:forgotPassword, className:'underline', style:{color:'#24496e'} }, 'Olvidé mi contraseña')
+        e('div', { className:'flex items-center justify-between text-sm pt-1' },
+          e('button', { type:'button', onClick:forgotPassword, className:'underline', style:{color:'#24496e'} }, 'Olvidé mi contraseña'),
+          e('button', { type:'button', onClick:changePassword, className:'underline', style:{color:'#24496e'} }, 'Cambiar contraseña')
         )
       )
     )
@@ -455,10 +458,12 @@ function CoursesBar({ courses, selectedCourseId, onSelect, onCreate, onRename, o
   );
 }
 
-function StudentsTable({ course, students, onAdd, onEdit, onDelete, onShowAbsences, onOpenGrades, onNotifyPreceptor }) {
+function StudentsTable({ course, students, selectedDate, onAdd, onEdit, onDelete, onShowAbsences, onOpenGrades, onNotifyPreceptor, onManualAttendance }) {
   const [cond, setCond] = useState('cursa');
   const [name, setName] = useState('');
+  const [activeFrom, setActiveFrom] = useState(selectedDate || todayStr());
   const sorted = useMemo(() => Object.values(students).sort((a,b)=>a.name.localeCompare(b.name)), [students]);
+  useEffect(() => { setActiveFrom(selectedDate || todayStr()); }, [selectedDate]);
   return e('div', { className:'p-4 md:p-6' },
     e('div', { className:'flex flex-col md:flex-row gap-2 md:items-end mb-4' },
       e('div', { className:'flex-1' },
@@ -470,9 +475,10 @@ function StudentsTable({ course, students, onAdd, onEdit, onDelete, onShowAbsenc
         e('select', { value:cond, onChange:(ev)=>setCond(ev.target.value), className:'px-3 py-2 border rounded-xl', style:{ borderColor:'#d7dbe0' } },
           e('option', {value:'cursa'}, 'Cursa'),
           e('option', {value:'recursa'}, 'Recursa')
-        )
+        ),
+        e('input', { type:'date', value:activeFrom, onChange:(ev)=>setActiveFrom(ev.target.value), className:'px-3 py-2 border rounded-xl', style:{ borderColor:'#d7dbe0' }, title:'Fecha desde la que cursa' })
       ),
-      e('button', { onClick:()=>{ if(!name.trim()) return; onAdd(name.trim(), cond); setName(''); },
+      e('button', { onClick:()=>{ if(!name.trim()) return; onAdd(name.trim(), cond, activeFrom || todayStr()); setName(''); },
         className:'px-4 py-2 rounded-xl text-white', style:{ background:'#6c467e' } }, '+ Agregar')
     ),
     e('div', { className:'overflow-x-auto' },
@@ -507,8 +513,9 @@ function StudentsTable({ course, students, onAdd, onEdit, onDelete, onShowAbsenc
                       e('button', { onClick:()=>{
                           const nuevo = prompt('Editar nombre', s.name) || s.name;
                           const cond = prompt('Condición (cursa/recursa)', s.condition || 'cursa') || (s.condition || 'cursa');
+                          const alta = prompt('Fecha desde la que cursa (AAAA-MM-DD)', getStudentActiveFrom(s)) || getStudentActiveFrom(s);
                           const norm = (cond||'').toLowerCase()==='recursa' ? 'recursa' : 'cursa';
-                          onEdit(s.id, { name: nuevo.trim(), condition: norm });
+                          onEdit(s.id, { name: nuevo.trim(), condition: norm, activeFrom: alta });
                         },
                         className:'text-xs px-2 py-1 rounded', style:{ background:'#f3efdc', color:'#24496e' } }, 'Editar')
                     )
@@ -541,7 +548,9 @@ function StudentsTable({ course, students, onAdd, onEdit, onDelete, onShowAbsenc
                       : null
                   ),
                   e('td', { className:'p-3 text-right' },
-                    e('div', {className:'flex gap-2 justify-end'},
+                    e('div', {className:'flex gap-2 justify-end flex-wrap'},
+                      e('button', { onClick:()=>onManualAttendance(s), className:'text-xs px-3 py-1 rounded',
+                        style:{ background:'#e8f7ef', color:'#166534' } }, 'Cargar asistencia'),
                       e('button', { onClick:()=>onOpenGrades(s), className:'text-xs px-3 py-1 rounded',
                         style:{ background:'#f0eaf5', color:'#6c467e' } }, 'Notas'),
                       e('button', { onClick:()=>{ if(confirm('¿Eliminar estudiante y sus datos?')) onDelete(s.id); },
@@ -601,7 +610,7 @@ function RollCallCard({ students, onMark, onUndo, selectedDate }) {
     setOps(arr => arr.slice(0, -1));
   }
 
-  if (!students.length) return e('div', { className:'p-6 text-center text-slate-600' }, 'No hay estudiantes en este curso.');
+  if (!students.length) return e('div', { className:'p-6 text-center text-slate-600' }, 'No hay estudiantes pendientes para la fecha elegida.');
 
   const cardPos = Math.min(index + 1, order.length);
   return e('div', { className:'p-4 md:p-6' },
@@ -1019,14 +1028,23 @@ function App() {
       return next;
     });
   }
-  function addStudent(name, condition){
+  function addStudent(name, condition, activeFrom){
     if(!selectedCourseId) return;
     const id = uid('alumno');
     setState(s=>{
       const next = Object.assign({}, s);
       const course = Object.assign({}, next.courses[selectedCourseId]);
       const students = Object.assign({}, course.students);
-      students[id] = { id, name, condition: (condition || 'cursa'), stats:{present:0, absent:0, later:0}, history:[], grades:[] };
+      students[id] = {
+        id,
+        name,
+        condition: (condition || 'cursa'),
+        createdAt: todayStr(),
+        activeFrom: activeFrom || selectedDate || todayStr(),
+        stats:{present:0, absent:0, later:0},
+        history:[],
+        grades:[]
+      };
       course.students = students;
       next.courses = Object.assign({}, next.courses);
       next.courses[selectedCourseId] = course;
@@ -1043,6 +1061,7 @@ function App() {
       else if (payload && typeof payload === 'object') {
         if (payload.name) st.name = payload.name;
         if (payload.condition) st.condition = payload.condition;
+        if (payload.activeFrom) st.activeFrom = payload.activeFrom;
       }
       students[id] = st; course.students = students;
       next.courses = Object.assign({}, next.courses); next.courses[selectedCourseId] = course;
@@ -1066,12 +1085,21 @@ function App() {
       const course = Object.assign({}, next.courses[selectedCourseId]);
       const students = Object.assign({}, course.students);
       const st = Object.assign({}, students[studentId]);
+      const targetDate = dateStr || todayStr();
+      if (getStudentActiveFrom(st) > targetDate) {
+        alert('Ese estudiante todavía no estaba activo en la fecha elegida.');
+        return s;
+      }
+      if (hasAttendanceOnDate(st, targetDate)) {
+        alert('Ese estudiante ya tiene asistencia cargada para esa fecha.');
+        return s;
+      }
       let stats = safeStats(st.stats); stats = { present:stats.present||0, absent:stats.absent||0, later:stats.later||0 };
       if (action==='present') stats.present += 1;
       if (action==='absent')  stats.absent  += 1;
       if (action==='later')   stats.later   += 1;
       const history = (st.history || []).slice();
-      history.push({ id: uid('hist'), date: dateStr || todayStr(), status: action });
+      history.push({ id: uid('hist'), date: targetDate, status: action });
       st.stats = stats; st.history = history; students[studentId] = st; course.students = students;
       next.courses = Object.assign({}, next.courses); next.courses[selectedCourseId] = course;
       return next;
@@ -1099,6 +1127,28 @@ function App() {
       next.courses = Object.assign({}, next.courses); next.courses[selectedCourseId] = course;
       return next;
     });
+  }
+
+  function addManualAttendance(student){
+    if (!student) return;
+    const suggestedDate = selectedDate || todayStr();
+    const dateStr = prompt(`Fecha a cargar para ${student.name} (AAAA-MM-DD)`, suggestedDate);
+    if (!dateStr) return;
+    if (getStudentActiveFrom(student) > dateStr) {
+      alert('La fecha es anterior al alta del estudiante en este curso.');
+      return;
+    }
+    if (hasAttendanceOnDate(student, dateStr)) {
+      alert('Ese estudiante ya tiene asistencia cargada para esa fecha.');
+      return;
+    }
+    const rawAction = prompt('Estado: presente / ausente / tarde', 'presente');
+    const action = normalizeAttendanceAction(rawAction);
+    if (!action) {
+      alert('Estado inválido. Usá presente, ausente o tarde.');
+      return;
+    }
+    markAttendance(student.id, action, dateStr);
   }
 
   function openGrades(student){ setGradesStudentId(student.id); setGradesOpen(true); }
@@ -1215,6 +1265,14 @@ function App() {
     if (!selectedCourse) return [];
     return Object.values(selectedCourse.students).sort((a,b)=>a.name.localeCompare(b.name));
   }, [selectedCourse]);
+
+  const pendingStudentsArr = useMemo(() => {
+    if (!selectedCourse) return [];
+    return Object.values(selectedCourse.students)
+      .filter(st => getStudentActiveFrom(st) <= selectedDate)
+      .filter(st => !hasAttendanceOnDate(st, selectedDate))
+      .sort((a,b)=>a.name.localeCompare(b.name));
+  }, [selectedCourse, selectedDate]);
 
   const gradesStudent = selectedCourse && gradesStudentId ? selectedCourse.students[gradesStudentId] || null : null;
   const absencesStudent = selectedCourse && absencesStudentId ? selectedCourse.students[absencesStudentId] || null : null;
